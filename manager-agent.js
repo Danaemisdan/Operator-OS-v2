@@ -22,26 +22,21 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `navigate directly to its URL as the first step. NEVER search Google or any search engine to find a site you already know.\n` +
     `Wrong: "Open Google" then "Search for Amazon" then "Navigate to Amazon"\n` +
     `Right: "Navigate to https://www.amazon.com"\n\n` +
-    `RESEARCH SKILLS — use ONLY when the goal explicitly requires finding data before browser actions:\n` +
-    `- searchLeads: find PEOPLE by job title/industry (founders, engineers, executives). B2B only.\n` +
-    `- lookupCompany: get structured info about a specific named company\n` +
-    `- lookupApp: get info about a specific named software/app/service\n` +
-    `- searchNews: find recent news on a specific topic or company\n` +
-    `- extractPageData: extract structured data from a known URL\n\n` +
-    `RESEARCH GATE — set research_needed=true ONLY IF the goal is about finding specific people/companies/contacts to reach out to.\n` +
-    `DO NOT use research for:\n` +
-    `  - Product searches ("best phone", "water bottles", "cheap laptops") → just browse a shopping site\n` +
-    `  - Content browsing ("nice videos", "movies", "music") → just browse the site directly\n` +
-    `  - General info questions ("best way to X", "how to Y") → just use Google/the browser\n` +
-    `  - Any goal where a simple browser search would answer it\n\n` +
-    `STEP RULES:\n` +
-    `- Write steps as plain text with NO leading numbers or prefixes\n` +
-    `- If already on the right page, skip navigation steps\n` +
-    `- Maximum 4 steps. Merge trivial steps.\n\n` +
-    `Example A — goal names a website (navigate directly, no research):\n` +
-    `{"research_needed":false,"research_skill":null,"research_args":null,"steps":["Navigate to [site URL]","[do the task on site]"]}\n\n` +
-    `Example B — goal needs to discover unknown targets first (research then browser):\n` +
-    `{"research_needed":true,"research_skill":"searchLeads","research_args":{"role":"founder","industry":"AI","limit":20},"steps":["Open relevant pages from results","Extract contact info"]}\n\n` +
+    `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
+    `- searchLeads: returns structured list of people matching a role/industry/location\n` +
+    `- lookupCompany: returns structured data about a named company\n` +
+    `- lookupApp: returns structured data about a named software/app\n` +
+    `- searchNews: returns recent news articles on a topic\n` +
+    `- extractPageData: extracts structured data from a URL\n\n` +
+    `RESEARCH GATE — ask: would the research output directly feed into the browser steps as input?\n` +
+    `  YES → set research_needed=true and choose the right skill\n` +
+    `  NO  → set research_needed=false and just plan browser steps\n\n` +
+    `Research makes sense when: the goal requires gathering a list of targets, contacts, or data points\n` +
+    `that the agent will then act on in the browser (open pages, extract info, fill forms).\n` +
+    `Research does NOT make sense when: the browser itself can find the answer just by navigating and searching.\n\n` +
+    `JSON output format (two variants):\n` +
+    `No research: {"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n` +
+    `With research: {"research_needed":true,"research_skill":"skillName","research_args":{...},"steps":[...]}\n\n` +
     `Now plan this goal:\n` +
     `Goal: "${goal}"\n` +
     `Current page: ${currentUrl || 'New tab'}\n` +

@@ -523,34 +523,25 @@ async function handleChatSubmit() {
 
   // ─── PRE-TASK: Gather missing info before decomposing ──────────────────────
   async function gatherMissingInfo(goal) {
-    const gatherPrompt = `You are about to execute this browser task: "${goal}"
+    const gatherPrompt = `Browser task: "${goal}"
 
-Ask SHORT clarifying questions when the answer would meaningfully change what you search for or where you go.
+Decide if any information is missing that would structurally change what you navigate to or what you type into a search.
 
-ASK when:
-- Goal mentions shopping/buying and no budget or brand preference given (ask budget range, brand preference)
-- Goal mentions finding a person/contact and no specific name or company given
-- Goal needs an account to be used (which account? which email?)
-- Goal is about booking something (specific dates? location? budget?)
-- Product/service category is very broad (which type? which use case?)
+ASK when missing info changes the destination or query:
+- A budget/price range that changes which products or filters to use
+- A specific person, company, or place name when the goal is vague
+- Dates or locations needed for booking/travel
+- Which account or profile to use when multiple are implied
+- A specific product model/version when the category is too broad to search
 
-DO NOT ASK about:
-- How you should do the task (method/approach — you decide)
-- Things obvious from context
-- Preferences that don't change the search (color, minor aesthetics)
-- Goals that are specific enough already
+NEVER ask about:
+- How to do the task (method is your decision)
+- Aesthetics or minor preferences that don't change the search
+- Things the browser can figure out by browsing
+- Anything that a reasonable default assumption covers
 
-Max 2 questions. If the goal is specific enough, return [].
-
-Examples:
-Goal: "find the best phone to buy" → ["What is your budget range?", "Do you prefer Android or iPhone?"]
-Goal: "book a flight to Paris" → ["What dates are you travelling?", "Flying from which city?"]
-Goal: "find water bottles on amazon" → [] (specific enough)
-Goal: "open YouTube" → [] (nothing to ask)
-Goal: "find me AI startup leads" → ["What role/job title are you targeting?", "Any specific industry focus?"]
-
-Return ONLY a JSON array: ["question1", "question2"] or []`;
-
+Max 2 questions. Return [] if the goal is specific enough to start.
+Return ONLY a JSON array of question strings, nothing else.`;
 
     try {
       // ── Suppress stream rendering so [] never leaks into chat ────────────────────────
