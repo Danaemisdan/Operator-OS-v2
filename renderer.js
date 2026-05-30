@@ -388,21 +388,71 @@ async function handleChatSubmit() {
 
   if (intent === 'chat') {
     streamDiv = null;
-    // Pass full conversation history so the model has context of all previous turns
     const chatResponse = await window.electronAPI.agentChat(
       goalText,
       { url: '', title: '', elements: [] },
-      [],
-      '',
+      [], '',
       conversationHistory
     );
-    const replyText = chatResponse?.args?.text || '';
-    if (streamDiv) {
-      // Streaming finished — capture what was streamed
-      const streamed = streamDiv.textContent || '';
-      streamDiv = null;
-      if (streamed) pushToHistory(goalText, streamed);
-    } else if (replyText) {
+    const replyText = (chatResponse?.args?.text || streamDiv?.textContent || '').trim();
+    streamDiv = null;
+
+    // ── Smart Escalation: did the model's OWN reply reveal a browser task? ────
+    // Check the reply text for site names + task signals.
+    // This catches cases where the input was truncated/typo'd but the model
+    // correctly understood it was a browser task.
+    const SITE_NAMES = [
+      'linkedin','google','gmail','amazon','twitter','instagram','facebook',
+      'youtube','notion','slack','discord','github','reddit','netflix',
+      'spotify','hubspot','salesforce','shopify','airbnb','booking','zoom','outlook',
+    ];
+    const TASK_SIGNALS = [
+      'help you','assist you','find','search','navigate','go to','look for',
+      'lead','leads','job','jobs','apply','send','message','book','order',
+    ];
+    const replyLower = replyText.toLowerCase();
+    const inputLower = goalText.toLowerCase();
+    const combinedLower = replyLower + ' ' + inputLower;
+
+    const siteInReplyOrInput = SITE_NAMES.some(s => combinedLower.includes(s));
+    const taskInReply        = TASK_SIGNALS.some(t => replyLower.includes(t));
+
+    if (siteInReplyOrInput && taskInReply) {
+      // The model confirmed this is a browser task.
+      // Strip disclaimers ("I can only provide general guidance...", "I'm a browser-based...")
+      // and show only the clarifying question part so user can answer it.
+      const disclaimerPhrases = [
+        /i('ll need to clarify|'m a browser[- ]based)[^.]*\./gi,
+        /i can only provide general guidance[^.]*\./gi,
+        /\(and by the way[^)]*\)/gi,
+        /i don'?t have (direct )?access[^.]*\./gi,
+      ];
+      let cleanReply = replyText;
+      for (const rx of disclaimerPhrases) cleanReply = cleanReply.replace(rx, '').trim();
+      cleanReply = cleanReply.replace(/\n{3,}/g, '\n\n').trim();
+
+      // Show the cleaned reply (just the clarifying question)
+      if (cleanReply) {
+        appendAiMessage(cleanReply);
+        pushToHistory(goalText, cleanReply);
+      }
+
+      // Auto-update the intent badge to TASK
+      const badge = document.querySelector('.intent-badge');
+      if (badge) { badge.textContent = 'TASK'; badge.className = 'intent-badge intent-task'; }
+
+      // Re-run as TASK with the original input — gatherMissingInfo will collect the rest
+      // Delay slightly so user sees the clarifying question first
+      appendAiMessage(`<em style="opacity:0.6;font-size:0.85em">↳ Escalated to task mode — answering above will start execution</em>`);
+
+      // Swap intent and fall through to task execution
+      // We do this by calling handleTaskExecution directly with the original goal
+      await handleTaskExecution(goalText);
+      return;
+    }
+
+    // Pure chat — no task detected, just reply
+    if (replyText) {
       appendAiMessage(replyText);
       pushToHistory(goalText, replyText);
     }
@@ -486,8 +536,6 @@ async function handleChatSubmit() {
   }
 
   // ─── PRE-TASK: Gather missing info before decomposing ──────────────────────
-  // Ask the LLM what info it needs, then ask the user for each piece.
-  // Returns an enriched goal string with all answers embedded.
   async function gatherMissingInfo(goal) {
     const gatherPrompt = `You are about to help execute this task: "${goal}"
 
@@ -524,9 +572,9 @@ Return ONLY the JSON array, nothing else.`;
     }
   }
 
-  // ─── Executor setup ────────────────────────────────────────────────────────
-  // Phase A: gather missing info BEFORE decomposing
-  const enrichedGoal = await gatherMissingInfo(goalText);
+  // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
+  async function handleTaskExecution(rawGoal) {
+    const enrichedGoal = await gatherMissingInfo(rawGoal);
 
   // Phase B: decompose enriched goal into steps
   streamDiv = null;
@@ -822,9 +870,15 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
       currentStepIdx++;
       previousActions = [];
     }
-  } // outer
+  } // outer while
+
+  } // end handleTaskExecution
+
+  // ─── Route to task execution from TASK intent ─────────────────────────────
+  await handleTaskExecution(goalText);
 
 } // end handleChatSubmit
+
 
 
 
