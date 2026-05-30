@@ -394,13 +394,12 @@ async function handleChatSubmit() {
       [], '',
       conversationHistory
     );
-    const replyText = (chatResponse?.args?.text || streamDiv?.textContent || '').trim();
+
+    // streamDiv is set by the streaming handler — if it was used, content is already rendered
+    const alreadyStreamed = !!streamDiv;
+    const replyText = (streamDiv?.textContent || chatResponse?.args?.text || '').trim();
     streamDiv = null;
 
-    // ── Smart Escalation: did the model's OWN reply reveal a browser task? ────
-    // Check the reply text for site names + task signals.
-    // This catches cases where the input was truncated/typo'd but the model
-    // correctly understood it was a browser task.
     const SITE_NAMES = [
       'linkedin','google','gmail','amazon','twitter','instagram','facebook',
       'youtube','notion','slack','discord','github','reddit','netflix',
@@ -418,9 +417,7 @@ async function handleChatSubmit() {
     const taskInReply        = TASK_SIGNALS.some(t => replyLower.includes(t));
 
     if (siteInReplyOrInput && taskInReply) {
-      // The model confirmed this is a browser task.
-      // Strip disclaimers ("I can only provide general guidance...", "I'm a browser-based...")
-      // and show only the clarifying question part so user can answer it.
+      // Strip disclaimers, show only the useful part — but ONLY if streaming didn't already render it
       const disclaimerPhrases = [
         /i('ll need to clarify|'m a browser[- ]based)[^.]*\./gi,
         /i can only provide general guidance[^.]*\./gi,
@@ -431,31 +428,21 @@ async function handleChatSubmit() {
       for (const rx of disclaimerPhrases) cleanReply = cleanReply.replace(rx, '').trim();
       cleanReply = cleanReply.replace(/\n{3,}/g, '\n\n').trim();
 
-      // Show the cleaned reply (just the clarifying question)
-      if (cleanReply) {
+      if (!alreadyStreamed && cleanReply) {
         appendAiMessage(cleanReply);
-        pushToHistory(goalText, cleanReply);
       }
+      pushToHistory(goalText, cleanReply || replyText);
 
-      // Auto-update the intent badge to TASK
       const badge = document.querySelector('.intent-badge');
       if (badge) { badge.textContent = 'TASK'; badge.className = 'intent-badge intent-task'; }
-
-      // Re-run as TASK with the original input — gatherMissingInfo will collect the rest
-      // Delay slightly so user sees the clarifying question first
-      appendAiMessage(`<em style="opacity:0.6;font-size:0.85em">↳ Escalated to task mode — answering above will start execution</em>`);
-
-      // Swap intent and fall through to task execution
-      // We do this by calling handleTaskExecution directly with the original goal
+      appendAiMessage(`<em style="opacity:0.6;font-size:0.85em">↳ Escalated to task mode</em>`);
       await handleTaskExecution(goalText);
       return;
     }
 
-    // Pure chat — no task detected, just reply
-    if (replyText) {
-      appendAiMessage(replyText);
-      pushToHistory(goalText, replyText);
-    }
+    // Pure chat
+    if (!alreadyStreamed && replyText) appendAiMessage(replyText);
+    pushToHistory(goalText, replyText);
     return;
   }
 
@@ -537,15 +524,18 @@ async function handleChatSubmit() {
 
   // ─── PRE-TASK: Gather missing info before decomposing ──────────────────────
   async function gatherMissingInfo(goal) {
-    const gatherPrompt = `You are about to help execute this task: "${goal}"
+    const gatherPrompt = `You are about to execute this browser task: "${goal}"
 
-What specific information is MISSING that you need from the user to complete this task?
-Think about: recipient names, message content, credentials, preferences, quantities, dates, etc.
+What CRITICAL information is missing that makes it impossible to start?
+Be very conservative. Only ask if you genuinely cannot proceed without it.
+Do NOT ask about method, approach, or preferences — you decide those.
+Do NOT ask about things you can figure out from context.
+Maximum 2 questions. If you can proceed with reasonable assumptions, return [].
 
-Return a JSON array of concise questions to ask. If you have everything, return [].
-Only ask for things genuinely needed. Don't ask for things you can figure out yourself.
-Example: ["Who should I send the message to?", "What should the message say?"]
-Return ONLY the JSON array, nothing else.`;
+Examples of GOOD questions: ["What email address should I search for?", "What product name should I buy?"]
+Examples of BAD questions: ["What type of leads?", "What message to send?", "What method to use?"]
+
+Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] or []`;
 
     try {
       const resp = await window.electronAPI.agentChat(
@@ -554,14 +544,16 @@ Return ONLY the JSON array, nothing else.`;
         [], '', []
       );
       const text = resp?.args?.text || '[]';
-      const match = text.match(/\[[\s\S]*\]/);
+      const match = text.match(/\[[\s\S]*?\]/);
       if (!match) return goal;
       const questions = JSON.parse(match[0]);
       if (!Array.isArray(questions) || questions.length === 0) return goal;
+      // Hard cap: never ask more than 2 questions
+      const capped = questions.slice(0, 2);
 
-      appendAiMessage(`💡 Before I start, I need a few things from you:`);
+      appendAiMessage(`💡 Quick question before I start:`);
       let enrichedGoal = goal;
-      for (const q of questions) {
+      for (const q of capped) {
         const answer = await askUser(q);
         enrichedGoal += `\n[${q}: ${answer}]`;
         appendAiMessage(`✓ Got it: **${answer}**`);
