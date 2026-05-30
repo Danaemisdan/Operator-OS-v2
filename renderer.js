@@ -539,7 +539,7 @@ Return ONLY the JSON array, nothing else.`;
   let isComplete = false;
   let previousActions = [];
   let currentStepIdx = 0;
-  const MAX_ACTIONS_PER_STEP = 10;
+  const MAX_ACTIONS_PER_STEP = 12;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   while (!isComplete && currentStepIdx < plan.steps.length) {
@@ -559,8 +559,9 @@ Return ONLY the JSON array, nothing else.`;
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
 
-        // Tell the agent EXACTLY what's on screen right now
-        const contextualStep = `${currentStep}
+        // Tell the agent EXACTLY what's on screen + the full original goal for context
+        const contextualStep = `ORIGINAL GOAL: ${enrichedGoal}
+CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
 [You are currently on: ${activeGraph.url}]
 [Page type: ${activeGraph.semanticPattern || 'Unknown'}]
 [Page title: ${activeGraph.title || 'Unknown'}]`;
@@ -708,7 +709,7 @@ Types: person=a real human, company=an organization, url=a website, note=a key f
           msg += `<br>💬 <em>${question}</em>`;
           appendAiMessage(msg);
           const answer = await askUser(question);
-          previousActions.push(`Expectation: "${expectation}". Outcome: User told me: "${answer}" (in answer to: "${question}")`);
+          previousActions.push(`Expectation: "${expectation}". Outcome: User answered: "${answer}"`);
           appendAiMessage(`👍 Got it. Continuing...`);
           continue;
 
@@ -722,52 +723,85 @@ Types: person=a real human, company=an organization, url=a website, note=a key f
 
         } else if (action === 'click' || action === 'type') {
           const targetId = (args.targetId || '').trim();
-          // Search in the fresh activeGraph
           const el = activeGraph.elements.find(e => e.id === targetId);
 
           if (el && el.position) {
             const x = Math.round(el.position.x + el.position.width / 2);
             const y = Math.round(el.position.y + el.position.height / 2);
-            msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")`;
+            msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
-            // Hash elements to detect changes
             const domBefore = JSON.stringify(activeGraph.elements);
 
-            await window.electronAPI.executeAction({
-              webContentsId: wv.getWebContentsId(),
-              action,
-              payload: { x, y, text: args.text || '' }
-            });
+            if (action === 'type') {
+              // Step 1: Click the element to focus it
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'click',
+                payload: { x, y }
+              });
+              await delay(200);
+              // Step 2: Select all existing text (Ctrl+A) to clear it before typing
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'keyboard_shortcut',
+                payload: { modifiers: ['ctrl'], keyCode: 'A' }
+              });
+              await delay(100);
+              // Step 3: Type the new text
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'type',
+                payload: { x, y, text: args.text || '' }
+              });
+            } else {
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'click',
+                payload: { x, y }
+              });
+            }
 
-            // Wait then refresh DOM — see what actually changed
             if (action === 'click') await waitForPageLoad(wv, 4000);
             else await delay(600);
             await refreshActiveGraph(wv);
 
             const urlNow = wv.src || '';
             const domAfter = JSON.stringify(activeGraph.elements);
-            
+
             let outcome = `Executed ${action} on ${targetId}. `;
+            if (action === 'type') outcome += `Typed "${(args.text || '').substring(0,60)}". `;
             if (urlNow !== urlBefore) {
               outcome += `URL changed to ${urlNow}. `;
             } else if (domBefore !== domAfter) {
-              outcome += `URL stayed same, but DOM changed (modal appeared/closed or content loaded). `;
+              outcome += `DOM changed (content updated/modal/autocomplete appeared). `;
             } else {
-              outcome += `Nothing visually changed. Action may have failed or was a no-op. `;
+              outcome += `Nothing visually changed. `;
             }
 
             previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
-            await window.electronAPI.recordMemory({ goal: currentStep, url: urlBefore, action: `click ${targetId}`, outcome: 'success', detail: outcome });
+            await window.electronAPI.recordMemory({ goal: currentStep, url: urlBefore, action: `${action} ${targetId}`, outcome: 'success', detail: outcome });
           } else {
-            msg += `<br>⚠️ Element <code>${targetId}</code> not in current DOM. Asking for help.`;
-            previousActions.push(`${targetId} not found in DOM (page: ${activeGraph.url})`);
+            msg += `<br>⚠️ Element <code>${targetId}</code> not in current DOM.`;
+            previousActions.push(`${targetId} not found in DOM (page: ${activeGraph.url}). Try scrolling or a different element.`);
           }
+
+        } else if (action === 'press_enter') {
+          // Submit forms, confirm searches, send messages
+          msg += `<br>↩️ Pressing Enter`;
+          await window.electronAPI.executeAction({
+            webContentsId: wv.getWebContentsId(),
+            action: 'keyboard_shortcut',
+            payload: { modifiers: [], keyCode: 'Return' }
+          });
+          await waitForPageLoad(wv, 5000);
+          await refreshActiveGraph(wv);
+          previousActions.push(`Expectation: "${expectation}". Outcome: Pressed Enter — URL is now ${wv.src}`);
 
         } else if (action === 'reply') {
           appendAiMessage(`🗣️ ${args.text || ''}`);
           previousActions.push('replied to user');
         } else {
-          previousActions.push(`${action || 'unknown'}`);
+          previousActions.push(`${action || 'unknown'} — unrecognised action`);
         }
 
         appendAiMessage(msg);

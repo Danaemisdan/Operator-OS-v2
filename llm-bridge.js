@@ -145,7 +145,7 @@ RULES:
 - Output status="complete" ONLY when you have verified the goal is actually achieved on screen.
 - ONE tool per response. No extra text outside the JSON.
 
-Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), scroll, reply(args.text=msg), ask_user(args.text=question), research(args.text=query)
+Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args, submits focused form/search), scroll, reply(args.text=msg), ask_user(args.text=question), research(args.text=query)
 
 Respond with ONLY this JSON:
 {"thought":"one sentence reasoning","expectation":"what should change on screen after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":"If complete, summarize what was found/done, else null"}`;
