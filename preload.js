@@ -45,4 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Observer AI + Recovery Agent ────────────────────────────────────────────
   observePage:     (p) => ipcRenderer.invoke('observe-page', p),
   recoverElement:  (p) => ipcRenderer.invoke('recover-element', p),
+
+  // ── Exploration Agent + Behavioral Learning ──────────────────────────────
+  explorePage:     (p) => ipcRenderer.invoke('explore-page', p),
+  recordBehavior:  (p) => ipcRenderer.invoke('record-behavior', p),
 });

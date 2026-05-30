@@ -14,6 +14,7 @@ const { pruneGraph } = require('./dom-pruner.js');
 const { recordEpisode, recallRelevant } = require('./memory.js');
 const { researchHeadless } = require('./research-agent.js');
 const { observePageState, recoverMissingElement } = require('./observer.js');
+const { explorePage, buildBehaviorRecord } = require('./exploration-agent.js');
 const kg = require('./knowledge-graph.js');
 
 const downloadDir = path.join(os.homedir(), 'Operator Downloads');
@@ -243,6 +244,34 @@ ipcMain.handle('recover-element', async (event, { targetText, targetId, currentE
   } catch (e) {
     console.error('[recover-element] error:', e.message);
     return { found: false };
+  }
+});
+
+// --- Exploration Agent ---
+ipcMain.handle('explore-page', async (event, { graph, domain }) => {
+  try {
+    const result = await explorePage({ graph, domain });
+    if (!result) return null;
+    // Auto-store page knowledge in KG
+    const pageKey = `${result.domain}${new URL(graph.url.startsWith('http') ? graph.url : 'https://' + graph.url).pathname.replace(/\/\d+\/?/g, '/:id/').substring(0, 60)}`;
+    await kg.upsertNode('page_knowledge', pageKey, result.pageKnowledge);
+    return result;
+  } catch (e) {
+    console.error('[explore-page] error:', e.message);
+    return null;
+  }
+});
+
+// --- Behavioral Learning ---
+ipcMain.handle('record-behavior', async (event, params) => {
+  try {
+    const record = buildBehaviorRecord(params);
+    const key = `${params.domain}::${params.elementId}::${params.action}`;
+    await kg.upsertNode('behavior', key, record);
+    return true;
+  } catch (e) {
+    console.error('[record-behavior] error:', e.message);
+    return false;
   }
 });
 

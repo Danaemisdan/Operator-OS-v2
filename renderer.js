@@ -474,6 +474,20 @@ async function handleChatSubmit() {
         }
       });
       activeGraph = parsed;
+
+      // ── Exploration Agent: runs on every page load, zero LLM ──────────────
+      // Classifies all elements, detects flows, stores page knowledge in KG.
+      // Silent — no UI output. This builds the behavioral map over time.
+      try {
+        const domain = new URL(parsed.url.startsWith('http') ? parsed.url : 'https://' + parsed.url).hostname;
+        const exploration = await window.electronAPI.explorePage({ graph: parsed, domain });
+        if (exploration && exploration.enrichedElements) {
+          // Merge exploration purposes back into activeGraph elements
+          activeGraph.elements = exploration.enrichedElements;
+          activeGraph._exploration = exploration.pageKnowledge;
+        }
+      } catch (_) {}
+
     } catch (e) {
       console.warn('[refreshActiveGraph] failed:', e.message);
     }
@@ -783,6 +797,28 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
             }
 
             previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
+
+            // ── Behavioral Learning: record what this element did ─────────────────
+            // Builds the site knowledge graph over time — no LLM needed.
+            if (action === 'click' && (urlNow !== urlBefore || domBefore !== domAfter)) {
+              const newElements = activeGraph.elements.filter(e =>
+                !JSON.parse(domBefore).find(old => old.id === e.id)
+              );
+              try {
+                const domain = new URL(urlBefore.startsWith('http') ? urlBefore : 'https://' + urlBefore).hostname;
+                window.electronAPI.recordBehavior({
+                  domain,
+                  url: urlBefore,
+                  elementId: targetId,
+                  elementText: el.text || '',
+                  elementCategory: el._exploration?.category || 'unknown',
+                  action: 'click',
+                  resultUrl: urlNow,
+                  resultPagePurpose: activeGraph._exploration?.purpose || 'unknown',
+                  resultElementsAppeared: newElements.slice(0, 8),
+                }).catch(() => {});
+              } catch (_) {}
+            }
 
             // ── Observer: feed real state back to planner after DOM change ─────────
             if (domBefore !== domAfter || urlNow !== urlBefore) {
