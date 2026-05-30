@@ -1,0 +1,9 @@
+node_modules/
+*.gguf
+dist/
+out/
+build/
+*.exe
+*.dll
+*.pak
+*.asar

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Operator OS</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div id="app-container">
+    <!-- Cross-platform drag region -->
+    <div class="title-bar-drag"></div>
+    
+    <div id="left-panel">
+      <div id="chat-section">
+        <div class="section-header">
+          <i data-lucide="message-square" class="icon-small"></i> Operator Chat
+        </div>
+        <div id="chat-history">
+          <div class="message system">Operator OS initialized. UI Mapper standing by.</div>
+        </div>
+        
+        <!-- Premium AI Prompt Box -->
+        <div id="chat-input-container">
+          <div class="premium-prompt-box">
+            <textarea id="chat-input" placeholder="Message Operator..." rows="1"></textarea>
+            <div class="prompt-actions">
+              <button class="action-btn" title="Attach"><i data-lucide="paperclip"></i></button>
+              <button class="submit-btn" id="chat-submit"><i data-lucide="arrow-up"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div id="resizer"></div>
+    
+    <div id="right-panel">
+      <!-- Browser Toolbar -->
+      <div id="browser-toolbar">
+        <div class="toolbar-group">
+          <button class="nav-btn" id="btn-back" title="Go Back"><i data-lucide="arrow-left"></i></button>
+          <button class="nav-btn" id="btn-forward" title="Go Forward"><i data-lucide="arrow-right"></i></button>
+          <button class="nav-btn" id="btn-refresh" title="Reload"><i data-lucide="rotate-cw"></i></button>
+        </div>
+        
+        <div id="url-bar-container">
+          <i data-lucide="lock" class="url-icon" style="width: 14px; height: 14px; color: #a1a1aa;"></i>
+          <input type="text" id="url-input" value="">
+        </div>
+        
+        <div class="toolbar-group">
+          <button class="nav-btn" id="btn-new-tab" title="New Tab"><i data-lucide="plus"></i></button>
+        </div>
+        <div id="loading-progress-bar"></div>
+      </div>
+
+      <!-- Browser Tabs -->
+      <div id="browser-tabs">
+        <!-- Tabs injected by JS -->
+      </div>
+
+      <!-- Browser View Container (Holds multiple webviews) -->
+      <div id="webview-container">
+        <!-- Webviews injected by JS -->
+      </div>
+    </div>
+
+    <!-- Dashboard overlay for AI Notes -->
+    <div id="dashboard-overlay" class="hidden">
+      <div id="dashboard-content">
+        <div class="dashboard-header">
+          <h2><i data-lucide="layout-dashboard"></i> OS Dashboard & AI Notes</h2>
+          <button id="btn-close-dashboard" class="close-btn"><i data-lucide="x"></i></button>
+        </div>
+        <div id="notes-content" contenteditable="true">
+# Site Knowledge Graph Memory
+Ready to map websites.
+When the UI Mapper explores a page, the resulting semantic graph will be stored and viewable here.
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge Graph Panel -->
+    <div id="kg-overlay" class="hidden">
+      <div id="kg-content">
+        <div class="dashboard-header">
+          <h2><i data-lucide="git-branch"></i> Knowledge Graph</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="kg-search" type="text" placeholder="Search people, tasks, notes..." style="background:rgba(255,255,255,0.07);border:1px solid #3f3f46;border-radius:8px;padding:6px 12px;color:white;font-size:0.85rem;outline:none;width:200px">
+            <select id="kg-type-filter" style="background:#1a1a2e;border:1px solid #3f3f46;border-radius:8px;padding:6px 10px;color:white;font-size:0.85rem;outline:none">
+              <option value="">All types</option>
+              <option value="person">👤 People</option>
+              <option value="task">✅ Tasks</option>
+              <option value="message">💬 Messages</option>
+              <option value="note">📝 Notes</option>
+              <option value="url">🔗 URLs</option>
+            </select>
+            <button id="kg-refresh" style="background:#6366f1;color:white;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:0.85rem">Refresh</button>
+            <button id="btn-close-kg" class="close-btn"><i data-lucide="x"></i></button>
+          </div>
+        </div>
+        <div id="kg-stats" style="display:flex;gap:16px;padding:8px 0 16px;font-size:0.8rem;color:#a1a1aa"></div>
+        <div id="kg-nodes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;overflow-y:auto;max-height:calc(100vh - 200px)"></div>
+      </div>
+    </div>
+
+    <!-- The Dock Trigger and Container -->
+    <div class="dock-wrapper">
+      <div class="dock-trigger"></div>
+      <div class="dock-container">
+        <div class="dock-item" id="dock-chat" title="Toggle Chat">
+          <i data-lucide="message-circle"></i>
+        </div>
+        <div class="dock-item" id="dock-browser" title="Focus Browser">
+          <i data-lucide="compass"></i>
+        </div>
+        <div class="dock-item active" id="dock-dashboard" title="Dashboard & AI Notes">
+          <i data-lucide="layout"></i>
+        </div>
+        <div class="dock-item" id="dock-mapper" title="Force Site Map">
+          <i data-lucide="map"></i>
+        </div>
+        <div class="dock-item" id="dock-kg" title="Knowledge Graph">
+          <i data-lucide="git-branch"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

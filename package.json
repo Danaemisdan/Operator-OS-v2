@@ -1,0 +1,28 @@
+{
+  "name": "operator-os",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Danaemisdan/operator-OS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Danaemisdan/operator-OS/issues"
+  },
+  "homepage": "https://github.com/Danaemisdan/operator-OS#readme",
+  "devDependencies": {
+    "electron": "^42.3.0"
+  },
+  "dependencies": {
+    "node-llama-cpp": "^3.18.1"
+  }
+}
