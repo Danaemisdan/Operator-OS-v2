@@ -151,8 +151,15 @@ function classifyElementPurpose(el) {
   if (['×','✕','✖','close','dismiss','not now','maybe later','no thanks','skip for now','remind me later','cancel'].some(k => tL === k) || aria === 'close' || id.includes('modal-close') || id.includes('close-btn'))
     return { category: 'dismiss', purpose: 'Closes popup, modal, or banner', confidence: 0.97 };
 
+  // ── role=button elements that mention "search" = submit buttons, NOT inputs ─
+  // Catches <input type="submit" role="button" aria-label="Google Search"> etc.
+  if ((role === 'button' || role === 'searchbutton') &&
+      (combined.includes('search') || combined.includes('find') || aria.includes('search')))
+    return { category: 'search_submit', purpose: 'Search submit button — click to run the search', confidence: 0.98 };
+
   // ── Search inputs (text fields without inputType already handled above) ────
   if ((tag === 'input' || tag === 'textarea') &&
+      role !== 'button' && role !== 'searchbutton' &&       // ← never misclassify buttons
       inputType !== 'submit' && inputType !== 'button' && inputType !== 'reset' &&
       (ph.includes('search') || ph.includes('find') || id.includes('search') || aria.includes('search')))
     return { category: 'search_input', purpose: `Search input — type your query here${ph ? ' ("' + ph + '")' : ''}`, confidence: 0.98 };

@@ -129,12 +129,22 @@ function parseSteps(full, goal) {
       const obj = JSON.parse(candidate);
       if (Array.isArray(obj.steps) && obj.steps.length > 0) {
         const steps = obj.steps
-          .map(s => String(s)
-            .replace(/^(\d+[.)]\s*)/,    '')
+          .map(s => {
+            // If the LLM returned a step as an object {action, url, text, ...} instead of a string,
+            // extract a readable description from it.
+            if (s && typeof s === 'object') {
+              const a = s.action || s.type || '';
+              const detail = s.url || s.text || s.query || s.target || s.description || s.step || '';
+              return detail ? `${a} ${detail}`.trim() : (s.description || s.step || JSON.stringify(s));
+            }
+            return String(s);
+          })
+          .map(s => s
+            .replace(/^(\d+[.)]\s*)/, '')
             .replace(/^(step\s*\d+\s*[:.)\-]\s*)/i, '')
             .trim()
           )
-          .filter(s => s.length > 3);
+          .filter(s => s.length > 3 && s !== '[object Object]');
         if (steps.length > 0) return {
           steps,
           current: 0,

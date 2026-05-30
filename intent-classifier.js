@@ -105,32 +105,22 @@ async function classifyIntent(message) {
     }
   }
 
-  // 6. Named-service escalation — if a message contains an action word AND what
-  //    looks like a named service or app (a word that isn't a common English word),
-  //    treat it as a task. Works for any app/site, not just a hardcoded list.
-  //    e.g. "find me sales leads on LinkedIn" / "open Notion" / "check Slack"
-  const COMMON_WORDS = new Set([
-    'the','a','an','and','or','but','in','on','at','to','for','of','with',
-    'it','is','was','be','do','as','we','me','my','you','your','he','she',
-    'what','how','why','when','where','who','that','this','these','those',
-    'get','set','see','use','let','has','had','can','may','not','all','any',
-    'new','one','two','out','now','just','more','also','like','here','there',
-    'best','good','help','need','want','make','find','show','tell','know',
-    'go','do','up','down','back','look','some','from','than','then','they',
-    'him','her','its','our','us','am','are','will','would','could','should',
+  // If the entire message (stripped) is just a greeting/filler, it's chat
+  const stripped = lower.replace(/[^a-z\s]/g,'').trim();
+  const GREETINGS = new Set([
+    'hey','hi','hello','yo','sup','howdy','heya','hiya',
+    'ok','okay','sure','yep','yeah','yes','no','nope','nah',
+    'cool','nice','great','wow','lol','thanks','thank','ty',
+    'hm','hmm','huh','ah','oh','uh','err','um','wait',
   ]);
-  const words = lower.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 3);
-  // A "named service" word: not a common English word, looks like a brand name (short, no spaces)
-  const hasNamedService = words.some(w => !COMMON_WORDS.has(w) && /^[a-z][a-z0-9]{2,}$/.test(w) && words.length <= 8);
-  // Action detected using same TASK_VERBS set already defined above
+  if (GREETINGS.has(stripped) || stripped.split(/\s+/).every(w => GREETINGS.has(w)))
+    return { intent: 'chat', confidence: 0.97 };
+
+  // For everything else: if it has ≥3 words AND contains a task verb → task
   const hasAction = [...TASK_VERBS].some(v => lower.includes(v));
-  if (hasNamedService && hasAction) {
-    return { intent: 'task', confidence: 0.85 };
-  }
-  // Short message that looks like a navigation intent (just a name + maybe "open/go")
-  if (hasNamedService && lower.split(/\s+/).length <= 4) {
-    return { intent: 'task', confidence: 0.80 };
-  }
+  const wordCount  = lower.trim().split(/\s+/).length;
+  if (wordCount >= 3 && hasAction)
+    return { intent: 'task', confidence: 0.82 };
 
 
   // 7. Everything else is conversation
