@@ -108,7 +108,31 @@ async function classifyIntent(message) {
     }
   }
 
-  // 6. Everything else is conversation
+  // 6. Site-name escalation — if message mentions a known site/service AND
+  //    contains an action-flavoured word anywhere, treat as task even if truncated.
+  //    Catches "ind me sales leads on LinkedIn" (missing 'f'), etc.
+  const KNOWN_SITES = [
+    'linkedin', 'google', 'gmail', 'amazon', 'twitter', 'instagram', 'facebook',
+    'youtube', 'notion', 'slack', 'discord', 'github', 'reddit', 'netflix',
+    'spotify', 'hubspot', 'salesforce', 'shopify', 'airbnb', 'booking',
+    'uber', 'doordash', 'whatsapp', 'telegram', 'zoom', 'outlook',
+  ];
+  const ACTION_WORDS = [
+    'find', 'search', 'get', 'look', 'send', 'message', 'apply', 'leads',
+    'jobs', 'post', 'buy', 'order', 'book', 'check', 'open', 'go',
+    'show', 'download', 'upload', 'connect', 'follow', 'like', 'share',
+  ];
+  const hasSite   = KNOWN_SITES.some(s => lower.includes(s) || s.startsWith(lower.replace(/[^a-z]/g, '').substring(0, 5)));
+  const hasAction = ACTION_WORDS.some(a => lower.includes(a));
+  if (hasSite && hasAction) {
+    return { intent: 'task', confidence: 0.88 };
+  }
+  // Even just mentioning a site with no other words → probably a navigation intent
+  if (hasSite && lower.split(' ').length <= 4) {
+    return { intent: 'task', confidence: 0.82 };
+  }
+
+  // 7. Everything else is conversation
   return { intent: 'chat', confidence: 0.85 };
 }
 
