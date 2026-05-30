@@ -609,17 +609,8 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
   // Inject research results into the goal context for the executor
   const executorGoal = researchContext ? enrichedGoal + researchContext : enrichedGoal;
 
-  // Show Research Agent spinner in TPP
-  if (plan.research_needed && plan.research_skill) {
-    tpp.setResearch(true, `Research Agent — ${plan.research_skill}`);
-  }
-
   const planHtml = plan.steps.map((s, i) => `<li>${i + 1}. ${s}</li>`).join('');
   appendAiMessage(`📋 **Plan:**<ol style="margin:8px 0 0 16px;padding:0">${planHtml}</ol>`);
-
-  // ── Show the Task Progress Panel ────────────────────────────────────────
-  tpp.show(rawGoal, plan.steps);
-  tpp.setResearch(false);
 
   let isComplete = false;
   let previousActions = [];
@@ -627,40 +618,37 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
   const MAX_ACTIONS_PER_STEP = 12;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
-
   while (!isComplete && currentStepIdx < plan.steps.length) {
     const currentStep = plan.steps[currentStepIdx];
     tpp.setStep(currentStepIdx);
     let actionCount = 0;
 
-    // ── Fast URL satisfaction check ────────────────────────────────────────
-    // If the step says "open/navigate/go to X" and we’re ALREADY on X,
-    // skip immediately. Stops the YouTube-5x loop.
+    // ── Already-on-page check ──────────────────────────────────────────────
+    // If this step says "open / navigate / go to X" and the browser is
+    // already on a page whose hostname contains the same keyword, skip it.
+    // Generic — no hardcoded domain list. Works for any site.
     const stepL = currentStep.toLowerCase();
     const wvNow = getActiveWebview();
     const urlNow0 = (wvNow && wvNow.src) ? wvNow.src.toLowerCase() : '';
-    const isNavStep = /open|navigate|go to|visit|browse to/.test(stepL);
-    const DOMAIN_MAP = {
-      youtube:'youtube.com', google:'google.com', gmail:'gmail.com',
-      amazon:'amazon.', linkedin:'linkedin.com', twitter:'twitter.com',
-      github:'github.com', reddit:'reddit.com', netflix:'netflix.com',
-      spotify:'spotify.com', notion:'notion.so', slack:'slack.com',
-      discord:'discord.com', instagram:'instagram.com', facebook:'facebook.com',
-    };
-    if (isNavStep) {
-      const alreadyThere = Object.entries(DOMAIN_MAP).some(
-        ([name, domain]) => stepL.includes(name) && urlNow0.includes(domain)
+    const isNavStep = /\b(open|navigate|go to|visit|browse to|launch)\b/.test(stepL);
+    if (isNavStep && urlNow0) {
+      // Extract meaningful words from current hostname, e.g. "google" from "www.google.com"
+      const hostname  = urlNow0.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
+      const siteWords = hostname.split(/[.\-]/).filter(
+        w => w.length > 2 && !['com','org','net','io','co','app','www'].includes(w)
       );
+      const alreadyThere = siteWords.some(word => stepL.includes(word));
       if (alreadyThere) {
-        appendAiMessage(`✓ Already on correct page — skipping "${currentStep}"`);
+        appendAiMessage(`✓ Already on this page — skipping "${currentStep}"`);
         tpp.stepDone(currentStepIdx);
         currentStepIdx++;
         previousActions = [`Already on correct page. Skipped navigation step.`];
-        continue; // outer while — go to next step
+        continue;
       }
     }
 
     while (!isComplete && actionCount < MAX_ACTIONS_PER_STEP) {
+
       actionCount++;
       try {
         const wv = getActiveWebview();
