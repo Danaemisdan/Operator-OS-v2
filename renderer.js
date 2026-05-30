@@ -387,10 +387,16 @@ async function handleChatSubmit() {
 
 
   if (intent === 'chat') {
+    // Refresh DOM so the model knows the actual current page state
+    try {
+      const wv = getActiveWebview();
+      if (wv) await refreshActiveGraph(wv);
+    } catch (_) {}
+
     streamDiv = null;
     const chatResponse = await window.electronAPI.agentChat(
       goalText,
-      { url: '', title: '', elements: [] },
+      activeGraph || { url: '', title: '', elements: [] },  // live page context
       [], '',
       conversationHistory
     );

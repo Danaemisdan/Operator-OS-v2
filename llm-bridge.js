@@ -109,11 +109,12 @@ function analyzeUIWithLLM(graph) {
 
 // ─── Main Agent Chat (with full conversation history for chat mode) ────────────
 async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false) {
+  // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
   const isChatMode = !graph.url && (!graph.elements || graph.elements.length === 0);
 
-  // Build rich page context from DOM graph (executor mode only)
+  // Build page context — always inject when we have a real graph (both chat AND executor)
   let pageContext = '';
-  if (!isChatMode) {
+  if (graph.url || (graph.elements && graph.elements.length > 0)) {
     const interactiveEls = (graph.elements || []).filter(e =>
       e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
     );
@@ -121,24 +122,21 @@ async function chatAgentWithLLM(promptText, graph, previousActions = [], sender,
       e.id && e.id.startsWith('TXT') && e.text && e.text.length > 3 && e.text.length < 100
     );
     const visibleTexts = textEls.slice(0, 8).map(e => `"${e.text}"`).join(', ');
-    pageContext = `Current Page:
-- URL: ${graph.url}
-- Type: ${graph.semanticPattern || 'Unknown'}
+    pageContext = `\n\nCurrent page the browser is showing right now:
+- URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
-- Visible text: ${visibleTexts || 'none'}
-- Interactive elements (${interactiveEls.length}):
-${interactiveEls.slice(0, 20).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}`;
+- Page type: ${graph.semanticPattern || 'Unknown'}
+- Visible text on screen: ${visibleTexts || 'none'}
+- Interactive elements (${interactiveEls.length} total):
+${interactiveEls.slice(0, 15).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}`;
   }
 
   const systemPrompt = isChatMode
     ? `You are Operator, an AI agent that controls a real browser and can do things on the web for the user.
 You have full browser access — you can open websites, search, click, type, fill forms, and automate tasks.
-NEVER say you cannot access the internet or external websites. You CAN and DO.
-NEVER say "I don't have direct access" — that is wrong. You are a browser agent.
-If the user asks you to do something on a website, say you will do it and ask any clarifying questions needed.
-Be concise. No disclaimers. No caveats about internet access.`
-    : `You are the Operator Executor Agent controlling a real browser.
-${pageContext}
+When the user asks what you see or which page you are on, answer ONLY from the page context provided below — never guess or make up page content from your training data.
+Be concise. No disclaimers.${pageContext}`
+    : `You are the Operator Executor Agent controlling a real browser.${pageContext}
 ${memory ? `\nPast memory:\n${memory}` : ''}
 Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-8).join(' | ')}
 
