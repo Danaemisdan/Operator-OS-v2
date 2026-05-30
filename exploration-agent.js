@@ -11,47 +11,136 @@ const http = require('http');
 
 // ── Element purpose classifier ────────────────────────────────────────────────
 function classifyElementPurpose(el) {
-  const t   = (el.text        || '').trim();
-  const tL  = t.toLowerCase();
-  const id  = (el.id          || '').toLowerCase();
-  const tag = (el.tag         || '').toLowerCase();
-  const ph  = (el.placeholder || '').toLowerCase();
-  const cls = (el.class       || el.className || '').toLowerCase();
-  const href= (el.href        || '').toLowerCase();
-  const type= (el.type        || '').toLowerCase();
-  const aria= (el.ariaLabel   || el['aria-label'] || '').toLowerCase();
+  const t          = (el.text        || '').trim();
+  const tL         = t.toLowerCase();
+  const id         = (el.id          || '').toLowerCase();
+  const tag        = (el.tag         || el.type || '').toLowerCase(); // html tag
+  const ph         = (el.placeholder || '').toLowerCase();
+  const cls        = (el.class       || el.className || '').toLowerCase();
+  const href       = (el.href        || '').toLowerCase();         // resolved full href
+  const hrefRaw    = (el.hrefRaw     || '').toLowerCase();         // raw href attr (#anchor, /path, javascript:)
+  const inputType  = (el.inputType   || '').toLowerCase();         // <input type="...">
+  const name       = (el.name        || '').toLowerCase();         // name="q" etc.
+  const value      = (el.value       || '').toLowerCase();         // current value / submit button label
+  const aria       = (el.ariaLabel   || el['aria-label'] || '').toLowerCase();
+  const role       = (el.role        || '').toLowerCase();
+  const parent     = (el.parentContext || '').toLowerCase();
+  const hasChildren= !!el.hasChildren;                             // contains interactive children
 
-  const combined = [tL, ph, aria, id].join(' ');
+  // Combine all text signals for keyword checks
+  const combined = [tL, ph, aria, name, id, value].join(' ');
 
-  // ── Submit-type inputs — MUST come before search_input check ───────────────
-  // <input type="submit"> and <button type="submit"> would otherwise be
-  // misclassified as search boxes because they share the word "search".
-  if (type === 'submit' || (type === 'button' && tag === 'input')) {
-    if (combined.includes('search') || combined.includes('find')) {
-      return { category: 'search_submit', purpose: 'Search submit button — click to run the search', confidence: 0.98 };
-    }
-    if (tL.includes('lucky') || tL.includes('lucky')) {
-      return { category: 'button', purpose: `Button: "${t}" — click to activate`, confidence: 0.90 };
-    }
-    return { category: 'submit', purpose: `Submit button: "${t}"`, confidence: 0.92 };
+  // ── inputType-based routing (most reliable signal) ────────────────────────
+  // Route by the actual HTML type= attribute FIRST, before any text matching.
+
+  // Password field
+  if (inputType === 'password')
+    return { category: 'auth_password_input', purpose: 'Password input field', confidence: 0.99 };
+
+  // Email field
+  if (inputType === 'email')
+    return { category: 'auth_email_input', purpose: 'Email address input field', confidence: 0.99 };
+
+  // Phone field
+  if (inputType === 'tel')
+    return { category: 'input_phone', purpose: 'Phone number field', confidence: 0.99 };
+
+  // Number / date / range
+  if (inputType === 'number')
+    return { category: 'form_input', purpose: `Numeric input${ph ? ': "' + ph + '"' : ''}`, confidence: 0.95 };
+  if (inputType === 'date' || inputType === 'datetime-local' || inputType === 'month')
+    return { category: 'form_input', purpose: `Date picker${ph ? ': "' + ph + '"' : ''}`, confidence: 0.95 };
+
+  // Search type input — text field
+  if (inputType === 'search')
+    return { category: 'search_input', purpose: `Search input — type your query here${ph ? ' ("' + ph + '")' : ''}`, confidence: 0.99 };
+
+  // File upload
+  if (inputType === 'file')
+    return { category: 'file_upload', purpose: 'File upload — click to browse and select a file', confidence: 0.99 };
+
+  // Checkbox / radio / range / color
+  if (inputType === 'checkbox')
+    return { category: 'checkbox', purpose: `Checkbox: "${aria || tL || name}" — toggle selection`, confidence: 0.97 };
+  if (inputType === 'radio')
+    return { category: 'radio', purpose: `Radio option: "${aria || tL || name}"`, confidence: 0.97 };
+
+  // Submit / reset buttons — MUST come before search_input (submit buttons share "search" text)
+  if (inputType === 'submit' || inputType === 'button' || inputType === 'reset') {
+    if (combined.includes('search') || combined.includes('find'))
+      return { category: 'search_submit', purpose: `Search submit button — click to run the search`, confidence: 0.98 };
+    if (inputType === 'reset')
+      return { category: 'button', purpose: `Reset/clear the form`, confidence: 0.93 };
+    return { category: 'submit', purpose: `Submit button: "${t || value || aria}"`, confidence: 0.93 };
   }
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
-  if (['sign in','log in','login','signin'].some(k => tL === k || aria.startsWith(k)))
+  // Hidden — skip
+  if (inputType === 'hidden') return null;
+
+  // ── name= attribute signals (very strong for form fields) ─────────────────
+  if (name === 'q' || name === 'query' || name === 'search' || name === 'keyword')
+    return { category: 'search_input', purpose: `Main search text field — type your query here`, confidence: 0.99 };
+  if (name === 'username' || name === 'user' || name === 'login')
+    return { category: 'auth_email_input', purpose: `Username / login field`, confidence: 0.97 };
+  if (name === 'password' || name === 'pass' || name === 'pwd')
+    return { category: 'auth_password_input', purpose: 'Password field', confidence: 0.99 };
+  if (name === 'email')
+    return { category: 'auth_email_input', purpose: 'Email address field', confidence: 0.98 };
+
+  // ── href-based routing for links ──────────────────────────────────────────
+  // Only for real <a> tags with non-trivial hrefs
+  if (tag === 'a' && href) {
+    // Anchor / same-page scroll — low value
+    if (hrefRaw.startsWith('#'))
+      return { category: 'anchor', purpose: `In-page anchor: "${t}"`, confidence: 0.90 };
+    // JavaScript void — acts like a button
+    if (hrefRaw.startsWith('javascript:'))
+      return null; // let later rules classify by text
+    // Pattern-based nav link classification from URL path
+    const path = hrefRaw.split('?')[0].replace(/\/$/, '');
+    if (/\/(jobs?|careers?|work-at)/i.test(path))
+      return { category: 'nav_jobs', purpose: `Link to Jobs section: "${t}"`, confidence: 0.94 };
+    if (/\/(messages?|messaging|inbox|chat)/i.test(path))
+      return { category: 'nav_messages', purpose: `Link to Messages: "${t}"`, confidence: 0.93 };
+    if (/\/(notifications?|alerts?)/i.test(path))
+      return { category: 'nav_notifications', purpose: `Link to Notifications: "${t}"`, confidence: 0.93 };
+    if (/\/(profile|me|account|user)/i.test(path))
+      return { category: 'nav_profile', purpose: `Link to Profile/Account: "${t}"`, confidence: 0.92 };
+    if (/\/(network|connections?|contacts?)/i.test(path))
+      return { category: 'nav_network', purpose: `Link to Network/Connections: "${t}"`, confidence: 0.92 };
+    if (/\/(settings?|preferences?|config)/i.test(path))
+      return { category: 'settings', purpose: `Link to Settings: "${t}"`, confidence: 0.93 };
+    if (/\/(login|signin|sign-in|auth)/i.test(path))
+      return { category: 'auth_login', purpose: `Link to login page`, confidence: 0.96 };
+    if (/\/(signup|register|join|create-account)/i.test(path))
+      return { category: 'auth_signup', purpose: `Link to sign-up page`, confidence: 0.96 };
+    if (/\/(search|find|results?)/i.test(path))
+      return { category: 'search_link', purpose: `Link to search: "${t}"`, confidence: 0.88 };
+    if (/\/(watch|video|play)/i.test(path))
+      return { category: 'media_link', purpose: `Link to video/media: "${t}"`, confidence: 0.88 };
+    if (/\/(product|item|dp|p)\//i.test(path))
+      return { category: 'product_link', purpose: `Product link: "${t}"`, confidence: 0.88 };
+    if (/\/(article|post|blog|news)\//i.test(path))
+      return { category: 'content_link', purpose: `Article/post link: "${t}"`, confidence: 0.85 };
+  }
+
+  // ── Auth (text-based) ─────────────────────────────────────────────────────
+  if (['sign in','log in','login','signin'].some(k => tL === k || aria === k))
     return { category: 'auth_login',  purpose: 'Opens login form to sign in', confidence: 0.99 };
   if (['sign up','create account','join now','register','get started','create free account'].some(k => tL === k))
     return { category: 'auth_signup', purpose: 'Opens sign-up / account creation form', confidence: 0.99 };
   if (['sign out','log out','logout','signout'].some(k => tL === k))
     return { category: 'auth_logout', purpose: 'Signs the user out', confidence: 0.99 };
-  if (type === 'password' || ph.includes('password') || ph.includes('passcode'))
+  if (ph.includes('password') || ph.includes('passcode'))
     return { category: 'auth_password_input', purpose: 'Password input field', confidence: 0.98 };
-  if (type === 'email' || ph.includes('email address') || ph.includes('your email'))
+  if (ph.includes('email address') || ph.includes('your email'))
     return { category: 'auth_email_input', purpose: 'Email address input field', confidence: 0.98 };
 
-  // ── Voice / media input ────────────────────────────────────────────────────
-  if (combined.includes('voice') || combined.includes('microphone') || combined.includes('speak') || id.includes('voice-btn'))
+  // ── Voice / microphone ────────────────────────────────────────────────────
+  if (combined.includes('voice') || combined.includes('microphone') || combined.includes('speak') || aria.includes('voice'))
     return { category: 'voice_input', purpose: 'Voice search — tap to speak your query', confidence: 0.97 };
 
+  // ── Auth ───────────────────────────────────────────────────────────────────
   // ── Cookie / privacy banners ───────────────────────────────────────────────
   if (['accept all','accept cookies','allow all','i agree','got it','accept & continue'].some(k => tL === k))
     return { category: 'cookie_accept', purpose: 'Accepts cookies/privacy banner — must click to proceed', confidence: 0.99 };
@@ -60,15 +149,15 @@ function classifyElementPurpose(el) {
 
   // ── Close / dismiss / overlays ─────────────────────────────────────────────
   if (['×','✕','✖','close','dismiss','not now','maybe later','no thanks','skip for now','remind me later','cancel'].some(k => tL === k) || aria === 'close' || id.includes('modal-close') || id.includes('close-btn'))
-    return { category: 'dismiss',      purpose: 'Closes popup, modal, or banner', confidence: 0.97 };
+    return { category: 'dismiss', purpose: 'Closes popup, modal, or banner', confidence: 0.97 };
 
-  // ── Search inputs (text fields only, never submit buttons) ────────────────
+  // ── Search inputs (text fields without inputType already handled above) ────
   if ((tag === 'input' || tag === 'textarea') &&
-      type !== 'submit' && type !== 'button' && type !== 'reset' &&
+      inputType !== 'submit' && inputType !== 'button' && inputType !== 'reset' &&
       (ph.includes('search') || ph.includes('find') || id.includes('search') || aria.includes('search')))
-    return { category: 'search_input', purpose: `Search input — type your query here (placeholder: "${ph || 'search'}")`, confidence: 0.98 };
+    return { category: 'search_input', purpose: `Search input — type your query here${ph ? ' ("' + ph + '")' : ''}`, confidence: 0.98 };
 
-  // ── Search submit buttons (text buttons whose label contains "search") ──────
+  // ── Search submit buttons (buttons with "search" in label, not handled by inputType) ─
   if ((tag === 'button' || tag === 'input') && (tL.includes('search') || tL.includes('find now') || aria.includes('search button')))
     return { category: 'search_submit', purpose: 'Search submit button — click to run the search', confidence: 0.96 };
 

@@ -525,16 +525,32 @@ async function handleChatSubmit() {
   async function gatherMissingInfo(goal) {
     const gatherPrompt = `You are about to execute this browser task: "${goal}"
 
-What CRITICAL information is missing that makes it impossible to start?
-Be very conservative. Only ask if you genuinely cannot proceed without it.
-Do NOT ask about method, approach, or preferences — you decide those.
-Do NOT ask about things you can figure out from context.
-Maximum 2 questions. If you can proceed with reasonable assumptions, return [].
+Ask SHORT clarifying questions when the answer would meaningfully change what you search for or where you go.
 
-Examples of GOOD questions: ["What email address should I search for?", "What product name should I buy?"]
-Examples of BAD questions: ["What type of leads?", "What message to send?", "What method to use?"]
+ASK when:
+- Goal mentions shopping/buying and no budget or brand preference given (ask budget range, brand preference)
+- Goal mentions finding a person/contact and no specific name or company given
+- Goal needs an account to be used (which account? which email?)
+- Goal is about booking something (specific dates? location? budget?)
+- Product/service category is very broad (which type? which use case?)
 
-Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] or []`;
+DO NOT ASK about:
+- How you should do the task (method/approach — you decide)
+- Things obvious from context
+- Preferences that don't change the search (color, minor aesthetics)
+- Goals that are specific enough already
+
+Max 2 questions. If the goal is specific enough, return [].
+
+Examples:
+Goal: "find the best phone to buy" → ["What is your budget range?", "Do you prefer Android or iPhone?"]
+Goal: "book a flight to Paris" → ["What dates are you travelling?", "Flying from which city?"]
+Goal: "find water bottles on amazon" → [] (specific enough)
+Goal: "open YouTube" → [] (nothing to ask)
+Goal: "find me AI startup leads" → ["What role/job title are you targeting?", "Any specific industry focus?"]
+
+Return ONLY a JSON array: ["question1", "question2"] or []`;
+
 
     try {
       // ── Suppress stream rendering so [] never leaks into chat ────────────────────────

@@ -224,15 +224,22 @@
       }
   
       elements.push({
-        id: id,
-        type: node.tagName.toLowerCase(),
-        text: text.substring(0, 500).replace(/\n/g, ' '),
-        href: node.href || node.getAttribute('href') || '',
+        id:          id,
+        tag:         node.tagName.toLowerCase(),                          // html tag: input, button, a, select…
+        type:        node.tagName.toLowerCase(),                          // kept for back-compat
+        inputType:   node.getAttribute('type') || '',                    // input type attr: text, submit, email, password, checkbox…
+        text:        text.substring(0, 500).replace(/\n/g, ' '),
+        href:        node.href || node.getAttribute('href') || '',        // full resolved href for <a>
+        hrefRaw:     node.getAttribute('href') || '',                    // raw href (relative paths, #anchors, javascript:)
         placeholder: node.placeholder || node.getAttribute('placeholder') || '',
-        src: node.src || node.currentSrc || '',
-        role: node.getAttribute('role') || node.tagName.toLowerCase(),
+        name:        node.getAttribute('name') || '',                    // form field name attr (e.g. name="q" for Google search)
+        value:       (node.tagName === 'INPUT' || node.tagName === 'BUTTON') ? (node.value || node.getAttribute('value') || '') : '',
+        ariaLabel:   node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '',
+        role:        node.getAttribute('role') || node.tagName.toLowerCase(),
+        src:         node.src || node.currentSrc || '',
         parentContext: parentContext.trim(),
-        position: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+        hasChildren: node.querySelector('input,button,select,textarea') !== null, // is a container with interactive children
+        position:    { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
       });
     });
   
