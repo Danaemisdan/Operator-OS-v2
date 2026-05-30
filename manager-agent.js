@@ -36,7 +36,8 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `No research: {"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n` +
     `With research: {"research_needed":true,"research_skill":"skillName","research_args":{...},"steps":[...]}\n\n` +
     `Goal: "${goal}"\n` +
-    `Current page: ${currentUrl || 'New tab'}\n\n` +
+    `Current page: ${currentUrl || 'New tab'}\n` +
+    `Available skills (executor can use these directly for common tasks): ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
     `Output ONLY JSON: {"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[...]}`;
 
 

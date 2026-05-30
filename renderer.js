@@ -577,30 +577,6 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
   async function handleTaskExecution(rawGoal) {
-
-    // ── Phase 0: Skills fast-path ─────────────────────────────────────────────
-    // Check if a built-in skill covers this goal. If yes, execute it directly.
-    // No LLM, no planning, no questions — deterministic and instant.
-    const matchedSkill = await window.electronAPI.matchSkill(rawGoal);
-    if (matchedSkill) {
-      appendAiMessage(`⚡ **Skill matched:** ${matchedSkill.name} — running directly`);
-      const wv = getActiveWebview();
-      const wcId = wv?.getWebContentsId?.() || 0;
-      const result = await window.electronAPI.executeSkill(
-        matchedSkill.id,
-        rawGoal,
-        wcId,
-        activeGraph || null,
-      );
-      if (result?.success === false) {
-        appendAiMessage(`⚠️ Skill failed (${result.error}) — falling back to full planning`);
-        // fall through to LLM planning below
-      } else {
-        appendAiMessage(`✅ Done via skill: **${matchedSkill.name}**`);
-        return;
-      }
-    }
-
     const enrichedGoal = await gatherMissingInfo(rawGoal);
 
   // Phase B: decompose enriched goal into steps
@@ -683,10 +659,40 @@ Return ONLY a JSON array of question strings, nothing else.`;
         const wv = getActiveWebview();
         const urlBefore = wv.src || '';
 
-
         // ── ALWAYS refresh DOM before asking LLM what to do ──────────────
         await refreshActiveGraph(wv);
         if (!activeGraph) { appendAiMessage('⚠️ Cannot read page.'); break; }
+
+        // ── Skill step check: if this planned step matches a built-in skill,
+        //    execute it directly instead of the action-by-action LLM executor.
+        //    The LLM still planned it, gatherMissingInfo still ran,
+        //    and observer verification still runs after. Best of both worlds.
+        const stepSkill = await window.electronAPI.matchSkill(currentStep);
+        if (stepSkill) {
+          appendAiMessage(`⚡ **${stepSkill.name}** skill — executing step directly`);
+          const wcId = wv?.getWebContentsId?.() || 0;
+          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, currentStep, wcId, activeGraph || null);
+          if (skillResult?.success !== false) {
+            await delay(1200);
+            await refreshActiveGraph(wv);
+            // Fall through to observer verification below by marking step as needing check
+            previousActions.push(`Executed skill: ${stepSkill.name} for step: ${currentStep}`);
+            // Treat skill success as "complete" for this step — observer will verify
+            await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'skill', outcome: 'success', detail: stepSkill.name });
+            tpp.stepDone(currentStepIdx);
+            currentStepIdx++;
+            if (currentStepIdx >= plan.steps.length) {
+              appendAiMessage(`✅ **All ${plan.steps.length} steps done!**`);
+              isComplete = true; tpp.complete();
+            } else {
+              appendAiMessage(`✅ Step done via skill → **${plan.steps[currentStepIdx]}**`);
+              tpp.setStep(currentStepIdx);
+              previousActions = [`Skill ${stepSkill.name} completed step. Now on: ${activeGraph.url}`];
+            }
+            break; // exit inner while, continue outer step loop
+          }
+          appendAiMessage(`⚠️ Skill failed — LLM executor taking over`);
+        }
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
