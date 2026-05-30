@@ -665,33 +665,53 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         // ── Skill step check: if this planned step matches a built-in skill,
         //    execute it directly instead of the action-by-action LLM executor.
-        //    The LLM still planned it, gatherMissingInfo still ran,
-        //    and observer verification still runs after. Best of both worlds.
+        //    The LLM still planned it, gatherMissingInfo still ran.
+        //    Observer ALWAYS verifies the actual result — not just "did page change".
         const stepSkill = await window.electronAPI.matchSkill(currentStep);
         if (stepSkill) {
-          appendAiMessage(`⚡ **${stepSkill.name}** skill — executing step directly`);
+          appendAiMessage(`⚡ **${stepSkill.name}** — executing step`);
           const wcId = wv?.getWebContentsId?.() || 0;
           const skillResult = await window.electronAPI.executeSkill(stepSkill.id, currentStep, wcId, activeGraph || null);
           if (skillResult?.success !== false) {
-            await delay(1200);
+            await delay(1500);
             await refreshActiveGraph(wv);
-            // Fall through to observer verification below by marking step as needing check
-            previousActions.push(`Executed skill: ${stepSkill.name} for step: ${currentStep}`);
-            // Treat skill success as "complete" for this step — observer will verify
-            await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'skill', outcome: 'success', detail: stepSkill.name });
-            tpp.stepDone(currentStepIdx);
-            currentStepIdx++;
-            if (currentStepIdx >= plan.steps.length) {
-              appendAiMessage(`✅ **All ${plan.steps.length} steps done!**`);
-              isComplete = true; tpp.complete();
+
+            // ── Observer verification — same as LLM executor path ──────────
+            // "Page changed" is NOT enough. Observer checks actual goal content.
+            tpp.setThought(`Verifying skill result: ${currentStep.substring(0, 70)}`);
+            const obs = await window.electronAPI.observePage({
+              graph: activeGraph,
+              lastAction: `skill:${stepSkill.id} for "${currentStep}"`,
+              expectation: `The goal "${currentStep}" should now be visibly achieved on screen`,
+              goalContext: enrichedGoal,
+            });
+
+            if (obs.blockers && obs.blockers.length > 0) {
+              appendAiMessage(`⚠️ Blocker after skill: **${obs.blockers.join(', ')}** — LLM resolving`);
+              previousActions.push(`Skill ran but blocked: ${obs.blockers.join(', ')}. ${obs.next_hint}`);
+              // Don't advance — let LLM executor handle the blocker
+            } else if (!obs.action_succeeded && obs.confidence > 0.6) {
+              appendAiMessage(`❌ Observer: skill didn't achieve goal — ${obs.what_changed}. LLM taking over`);
+              previousActions.push(`Skill ${stepSkill.name} ran but goal not achieved: ${obs.what_changed}. Hint: ${obs.next_hint}`);
+              // Don't advance — LLM executor will fix it
             } else {
-              appendAiMessage(`✅ Step done via skill → **${plan.steps[currentStepIdx]}**`);
-              tpp.setStep(currentStepIdx);
-              previousActions = [`Skill ${stepSkill.name} completed step. Now on: ${activeGraph.url}`];
+              // Verified ✅
+              await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'skill', outcome: 'success', detail: obs.what_changed });
+              tpp.stepDone(currentStepIdx);
+              currentStepIdx++;
+              if (currentStepIdx >= plan.steps.length) {
+                appendAiMessage(`✅ **All ${plan.steps.length} steps done!** — ${obs.what_changed}`);
+                isComplete = true; tpp.complete();
+              } else {
+                appendAiMessage(`✅ Step done (${obs.what_changed}) → **${plan.steps[currentStepIdx]}**`);
+                tpp.setStep(currentStepIdx);
+                previousActions = [`Skill ${stepSkill.name} verified: ${obs.what_changed}`];
+              }
+              break; // exit inner while, continue outer step loop
             }
-            break; // exit inner while, continue outer step loop
+          } else {
+            appendAiMessage(`⚠️ Skill failed — LLM executor taking over`);
           }
-          appendAiMessage(`⚠️ Skill failed — LLM executor taking over`);
         }
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
