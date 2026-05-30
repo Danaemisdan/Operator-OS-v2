@@ -14,7 +14,7 @@ const { pruneGraph } = require('./dom-pruner.js');
 const { recordEpisode, recallRelevant } = require('./memory.js');
 const { researchHeadless, searchLeads, lookupCompany, lookupApp, searchNews, extractPageData } = require('./research-agent.js');
 const { observePageState, recoverMissingElement } = require('./observer.js');
-const { explorePage, buildBehaviorRecord } = require('./exploration-agent.js');
+const { explorePage, buildBehaviorRecord, buildPageSummary } = require('./exploration-agent.js');
 const kg = require('./knowledge-graph.js');
 
 const downloadDir = path.join(os.homedir(), 'Operator Downloads');

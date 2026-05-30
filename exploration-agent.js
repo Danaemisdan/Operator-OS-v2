@@ -2,165 +2,390 @@
 const http = require('http');
 
 /**
- * EXPLORATION AGENT — ARCHITECTURE.md
+ * EXPLORATION AGENT — comprehensive heuristic classifier
  *
- * When Operator visits a site it hasn't mapped before:
- *   Scan pages → Open menus → Inspect forms → Build graph
- *
- * The result is a Site Knowledge Graph stored under the domain.
- * Every future task on this site uses the graph — no blind clicking.
- *
- * Output shape:
- * {
- *   domain: "linkedin.com",
- *   mapped_at: "...",
- *   pages: {
- *     "/jobs": {
- *       purpose: "Job search",
- *       inputs: ["search_keywords", "location"],
- *       actions: ["search", "easy_apply"],
- *       known_flows: { easy_apply: ["click BTN_Easy_Apply", "fill form", "submit"] }
- *     }
- *   },
- *   elements: { "BTN_EasyApply": { purpose: "Opens job application form" } },
- *   flows: { apply_job: [...steps] }
- * }
+ * Rules: ordered from most-specific to most-generic.
+ * Every real-world element type has a named category + human-readable purpose.
+ * Zero LLM calls. Fast on every page load.
  */
 
-// ── Element purpose classifier (heuristic, zero LLM) ─────────────────────────
-// Given an element from the DOM graph, classify what it does.
+// ── Element purpose classifier ────────────────────────────────────────────────
 function classifyElementPurpose(el) {
-  const t   = (el.text || '').toLowerCase().trim();
-  const id  = (el.id  || '').toLowerCase();
-  const tag = (el.tag || '').toLowerCase();
+  const t   = (el.text        || '').trim();
+  const tL  = t.toLowerCase();
+  const id  = (el.id          || '').toLowerCase();
+  const tag = (el.tag         || '').toLowerCase();
   const ph  = (el.placeholder || '').toLowerCase();
+  const cls = (el.class       || el.className || '').toLowerCase();
+  const href= (el.href        || '').toLowerCase();
+  const type= (el.type        || '').toLowerCase();
+  const aria= (el.ariaLabel   || el['aria-label'] || '').toLowerCase();
 
-  if (!t && !ph) return null;
+  const combined = [tL, ph, aria, id].join(' ');
 
-  const combined = t + ' ' + ph;
+  // ── Auth ───────────────────────────────────────────────────────────────────
+  if (['sign in','log in','login','signin'].some(k => tL === k || aria.startsWith(k)))
+    return { category: 'auth_login',  purpose: 'Opens login form to sign in', confidence: 0.99 };
+  if (['sign up','create account','join now','register','get started','create free account'].some(k => tL === k))
+    return { category: 'auth_signup', purpose: 'Opens sign-up / account creation form', confidence: 0.99 };
+  if (['sign out','log out','logout','signout'].some(k => tL === k))
+    return { category: 'auth_logout', purpose: 'Signs the user out', confidence: 0.99 };
+  if (type === 'password' || ph.includes('password') || ph.includes('passcode'))
+    return { category: 'auth_password_input', purpose: 'Password input field', confidence: 0.98 };
+  if (type === 'email' || ph.includes('email address') || ph.includes('your email'))
+    return { category: 'auth_email_input', purpose: 'Email address input field', confidence: 0.98 };
 
-  // Navigation
-  if (['home','feed','discover','explore','notifications','profile','settings','logout','sign out','log out'].some(k => t === k)) {
-    return { category: 'navigation', purpose: `Navigates to ${t} section`, confidence: 0.95 };
-  }
+  // ── Voice / media input ────────────────────────────────────────────────────
+  if (combined.includes('voice') || combined.includes('microphone') || combined.includes('speak') || id.includes('voice-btn'))
+    return { category: 'voice_input', purpose: 'Voice search — tap to speak your query', confidence: 0.97 };
 
-  // Search inputs
-  if (ph.includes('search') || t.includes('search') || ph.includes('find') || id.includes('search')) {
-    return { category: 'search_input', purpose: 'Primary search box — type query here', confidence: 0.97 };
-  }
+  // ── Cookie / privacy banners ───────────────────────────────────────────────
+  if (['accept all','accept cookies','allow all','i agree','got it','accept & continue'].some(k => tL === k))
+    return { category: 'cookie_accept', purpose: 'Accepts cookies/privacy banner — must click to proceed', confidence: 0.99 };
+  if (['reject all','decline','necessary only','manage cookies'].some(k => tL === k))
+    return { category: 'cookie_reject', purpose: 'Rejects optional cookies', confidence: 0.95 };
 
-  // Apply / CTA buttons
-  if (['apply now','easy apply','apply','apply here','quick apply','1-click apply'].includes(t)) {
-    return { category: 'apply_button', purpose: 'Opens job application flow', confidence: 0.99 };
-  }
+  // ── Close / dismiss / overlays ─────────────────────────────────────────────
+  if (['×','✕','✖','close','dismiss','not now','maybe later','no thanks','skip for now','remind me later','cancel'].some(k => tL === k) || aria === 'close' || id.includes('modal-close') || id.includes('close-btn'))
+    return { category: 'dismiss',      purpose: 'Closes popup, modal, or banner', confidence: 0.97 };
 
-  // Submit / confirm
-  if (['submit','submit application','send','confirm','done','finish','complete'].includes(t)) {
-    return { category: 'submit', purpose: 'Submits or confirms the current form', confidence: 0.98 };
-  }
+  // ── Search ─────────────────────────────────────────────────────────────────
+  if ((tag === 'input' || tag === 'textarea') && (ph.includes('search') || ph.includes('find') || id.includes('search') || aria.includes('search')))
+    return { category: 'search_input', purpose: `Search input — type query here (placeholder: "${ph || 'search'}")`, confidence: 0.98 };
+  if (tL === 'search' && tag === 'button')
+    return { category: 'search_submit', purpose: 'Submits the search query', confidence: 0.97 };
 
-  // Auth
-  if (['sign in','log in','login','sign up','create account','join now'].includes(t)) {
-    return { category: 'auth', purpose: t.includes('in') || t.includes('log') ? 'Opens login form' : 'Opens signup form', confidence: 0.98 };
-  }
+  // ── Apply / job CTAs ───────────────────────────────────────────────────────
+  if (['easy apply','apply now','apply','1-click apply','quick apply','apply here'].some(k => tL === k))
+    return { category: 'apply_button', purpose: 'Starts the job application flow', confidence: 0.99 };
+  if (['save job','save','unsave','bookmark'].some(k => tL === k) && (id.includes('job') || cls.includes('job') || cls.includes('save')))
+    return { category: 'save_item', purpose: 'Saves this job/item for later', confidence: 0.93 };
 
-  // Filters / sorting
-  if (['filter','sort','date posted','experience level','remote','on-site','full-time','part-time','salary'].some(k => combined.includes(k))) {
-    return { category: 'filter', purpose: `Filter or sort control: "${t || ph}"`, confidence: 0.92 };
-  }
+  // ── Social / engagement ────────────────────────────────────────────────────
+  if (['like','👍','love','react'].some(k => tL === k || tL.startsWith('like ')))
+    return { category: 'like',       purpose: 'Like or react to this post', confidence: 0.95 };
+  if (['subscribe','subscribed','unsubscribe'].some(k => tL === k))
+    return { category: 'subscribe',  purpose: tL === 'subscribed' ? 'Already subscribed — click to unsubscribe' : 'Subscribe to this channel/account', confidence: 0.97 };
+  if (['follow','following','unfollow'].some(k => tL === k))
+    return { category: 'follow',     purpose: tL === 'following' ? 'Currently following — click to unfollow' : 'Follow this person or page', confidence: 0.96 };
+  if (['connect','connected','pending'].some(k => tL === k) && (id.includes('connect') || cls.includes('connect')))
+    return { category: 'connect',    purpose: tL === 'connected' ? 'Already connected' : 'Send a connection request', confidence: 0.95 };
+  if (['comment','add a comment','write a comment','reply'].some(k => tL === k || ph.includes(k)))
+    return { category: 'comment',    purpose: 'Write a comment or reply', confidence: 0.94 };
+  if (['share','repost','retweet','reshare'].some(k => tL === k))
+    return { category: 'share',      purpose: 'Share or repost this content', confidence: 0.95 };
+  if (['message','send message','send a message','chat','dm'].some(k => tL === k))
+    return { category: 'message',    purpose: 'Open a direct message conversation', confidence: 0.95 };
 
-  // Close / dismiss
-  if (['close','dismiss','skip','×','✕','not now','maybe later','no thanks'].includes(t)) {
-    return { category: 'dismiss', purpose: 'Closes or dismisses a popup/modal', confidence: 0.97 };
-  }
+  // ── Form submit / confirm ──────────────────────────────────────────────────
+  if (['submit','submit application','submit form','send','send message','post','publish','save changes','update','confirm','done','finish','complete','continue','next','next step','proceed'].some(k => tL === k))
+    return { category: 'submit',     purpose: `Submits or confirms: "${t}"`, confidence: 0.97 };
 
-  // Form inputs
+  // ── Navigation links ───────────────────────────────────────────────────────
+  if (['home','feed','for you','following'].some(k => tL === k))
+    return { category: 'nav_home',   purpose: 'Navigates to home/main feed', confidence: 0.95 };
+  if (['jobs','job search','find jobs'].some(k => tL === k))
+    return { category: 'nav_jobs',   purpose: 'Navigates to job search section', confidence: 0.95 };
+  if (['messages','inbox','mail','email'].some(k => tL === k) && (tag === 'a' || tag === 'button'))
+    return { category: 'nav_messages', purpose: 'Navigates to messages/inbox', confidence: 0.93 };
+  if (['notifications','alerts'].some(k => tL === k) && tag !== 'input')
+    return { category: 'nav_notifications', purpose: 'Opens notifications panel', confidence: 0.93 };
+  if (['profile','my profile','account','me'].some(k => tL === k))
+    return { category: 'nav_profile', purpose: 'Opens your profile or account page', confidence: 0.93 };
+  if (['network','connections','my network'].some(k => tL === k))
+    return { category: 'nav_network', purpose: 'Navigates to network/connections page', confidence: 0.93 };
+  if (['explore','discover','browse','trending'].some(k => tL === k))
+    return { category: 'nav_explore', purpose: 'Explore or discover new content', confidence: 0.90 };
+
+  // ── Settings / config ──────────────────────────────────────────────────────
+  if (['settings','preferences','account settings','configuration'].some(k => tL === k))
+    return { category: 'settings',   purpose: 'Opens settings or preferences panel', confidence: 0.95 };
+  if (['privacy settings','privacy','privacy & safety'].some(k => tL === k))
+    return { category: 'privacy',    purpose: 'Opens privacy settings', confidence: 0.94 };
+  if (['help','help center','support','faq'].some(k => tL === k))
+    return { category: 'help',       purpose: 'Opens help center or support', confidence: 0.92 };
+
+  // ── Filters / sort ─────────────────────────────────────────────────────────
+  if (['filter','filters','all filters','advanced search','advanced filters'].some(k => tL === k))
+    return { category: 'filter_open', purpose: 'Opens filter panel to narrow results', confidence: 0.95 };
+  if (['sort by','sort','date posted','most recent','most relevant','top'].some(k => tL === k || ph.includes(k)))
+    return { category: 'filter_sort', purpose: `Sorting control: "${t || ph}"`, confidence: 0.92 };
+  if (['remote','on-site','hybrid','full-time','part-time','contract','internship','entry level','mid-senior','director'].some(k => tL === k))
+    return { category: 'filter_chip', purpose: `Filter: "${t}" — toggles this search filter`, confidence: 0.93 };
+  if (['experience level','job type','date posted','salary','company','location'].some(k => tL === k || ph.includes(k)))
+    return { category: 'filter_dropdown', purpose: `Filter dropdown: "${t || ph}"`, confidence: 0.91 };
+
+  // ── Form inputs ────────────────────────────────────────────────────────────
   if (tag === 'input' || tag === 'textarea') {
-    if (ph.includes('name') || ph.includes('email') || ph.includes('phone') || ph.includes('resume') || ph.includes('message')) {
-      return { category: 'form_input', purpose: `Form field: "${ph || t}"`, confidence: 0.95 };
+    if (ph.includes('first name') || ph.includes('last name') || ph.includes('full name') || ph.includes('your name'))
+      return { category: 'input_name',    purpose: `Name field: "${ph}"`, confidence: 0.96 };
+    if (ph.includes('phone') || ph.includes('mobile') || type === 'tel')
+      return { category: 'input_phone',   purpose: `Phone number field: "${ph}"`, confidence: 0.96 };
+    if (ph.includes('address') || ph.includes('city') || ph.includes('zip') || ph.includes('postcode'))
+      return { category: 'input_address', purpose: `Address/location field: "${ph}"`, confidence: 0.95 };
+    if (ph.includes('resume') || ph.includes('cv') || ph.includes('upload'))
+      return { category: 'input_resume',  purpose: `Upload field: "${ph}"`, confidence: 0.96 };
+    if (ph.includes('cover letter') || ph.includes('additional info') || ph.includes('tell us'))
+      return { category: 'input_freetext', purpose: `Free-text field: "${ph}"`, confidence: 0.94 };
+    if (ph.includes('message') || ph.includes('write') || ph.includes('type'))
+      return { category: 'input_message', purpose: `Message/compose field: "${ph}"`, confidence: 0.94 };
+    if (ph.includes('location') || ph.includes('city, state') || ph.includes('where'))
+      return { category: 'input_location', purpose: `Location input: "${ph}"`, confidence: 0.95 };
+    if (ph.includes('keyword') || ph.includes('job title') || ph.includes('skills') || ph.includes('what'))
+      return { category: 'input_keyword', purpose: `Keyword/job-title input: "${ph}"`, confidence: 0.94 };
+    if (ph.includes('company') || ph.includes('organization'))
+      return { category: 'input_company', purpose: `Company name input: "${ph}"`, confidence: 0.93 };
+    if (ph || t)
+      return { category: 'form_input',    purpose: `Form field: "${ph || t}"`, confidence: 0.82 };
+  }
+
+  // ── File / upload ──────────────────────────────────────────────────────────
+  if (type === 'file' || tL.includes('upload') || tL.includes('attach file') || tL.includes('choose file'))
+    return { category: 'file_upload', purpose: 'Upload a file (resume, image, document)', confidence: 0.95 };
+
+  // ── Video / media controls ─────────────────────────────────────────────────
+  if (['play','pause','play video','watch now'].some(k => tL === k) || aria.includes('play'))
+    return { category: 'media_play',   purpose: 'Plays or pauses the video', confidence: 0.95 };
+  if (tL === 'mute' || tL === 'unmute' || aria.includes('mute'))
+    return { category: 'media_mute',   purpose: 'Mutes or unmutes audio', confidence: 0.94 };
+  if (['fullscreen','full screen','expand'].some(k => tL === k || aria.includes(k)))
+    return { category: 'media_fullscreen', purpose: 'Toggles fullscreen mode', confidence: 0.93 };
+  if (['cc','captions','subtitles','closed captions'].some(k => tL === k))
+    return { category: 'media_captions', purpose: 'Toggles captions/subtitles', confidence: 0.93 };
+  if (tL.includes('skip ad') || tL.includes('skip intro'))
+    return { category: 'skip_ad',      purpose: `Skips ad or intro — click to skip`, confidence: 0.99 };
+  if (['next','next video','autoplay'].some(k => tL === k) && (id.includes('player') || cls.includes('player') || cls.includes('video')))
+    return { category: 'media_next',   purpose: 'Plays the next video', confidence: 0.90 };
+
+  // ── E-commerce ─────────────────────────────────────────────────────────────
+  if (['add to cart','add to bag','add to basket'].some(k => tL === k))
+    return { category: 'ecom_add_cart', purpose: 'Adds this item to your shopping cart', confidence: 0.99 };
+  if (['buy now','buy','purchase','order now','checkout'].some(k => tL === k))
+    return { category: 'ecom_buy',      purpose: 'Proceeds to purchase/checkout', confidence: 0.98 };
+  if (tL.includes('add to wishlist') || tL.includes('save for later'))
+    return { category: 'ecom_wishlist', purpose: 'Saves item to wishlist/saved items', confidence: 0.95 };
+  if (['place order','confirm order','pay now','complete order'].some(k => tL === k))
+    return { category: 'ecom_confirm',  purpose: 'Finalises and places the order', confidence: 0.98 };
+
+  // ── Content creation ───────────────────────────────────────────────────────
+  if (['create post','new post','start a post','write a post','compose','what\'s on your mind'].some(k => tL === k || ph.includes(k)))
+    return { category: 'create_post',   purpose: 'Opens post creation composer', confidence: 0.96 };
+  if (['create','new','add new','+ new','+','add'].some(k => tL === k))
+    return { category: 'create_item',   purpose: `Creates a new item: "${t}"`, confidence: 0.85 };
+  if (['upload','upload video','upload photo','upload file'].some(k => tL === k))
+    return { category: 'upload',        purpose: `Upload content: "${t}"`, confidence: 0.95 };
+
+  // ── Pagination / load more ─────────────────────────────────────────────────
+  if (['load more','show more','see more','view more','more results'].some(k => tL === k || tL.includes(k)))
+    return { category: 'load_more',     purpose: 'Loads more items/results below', confidence: 0.95 };
+  if (['next page','previous page','prev'].some(k => tL === k) || aria.includes('next page'))
+    return { category: 'pagination',    purpose: `Pagination: "${t}"`, confidence: 0.93 };
+
+  // ── Dropdown / menu toggles ────────────────────────────────────────────────
+  if (tL === '...' || tL === '…' || tL === 'more' || aria === 'more options' || aria === 'more actions' || aria.includes('overflow') || id.includes('kebab') || id.includes('dropdown-toggle'))
+    return { category: 'more_options',  purpose: 'Opens overflow/more-options menu', confidence: 0.92 };
+  if (tL === 'menu' || aria === 'open menu' || aria === 'main menu' || id.includes('hamburger') || id.includes('nav-toggle'))
+    return { category: 'menu_toggle',   purpose: 'Opens navigation/hamburger menu', confidence: 0.92 };
+
+  // ── Tabs / section switchers ───────────────────────────────────────────────
+  if (['posts','activity','experience','education','skills','about','reviews','photos','videos','community','discussions'].some(k => tL === k) && (tag === 'button' || tag === 'a'))
+    return { category: 'tab',           purpose: `Switches to "${t}" section/tab`, confidence: 0.88 };
+
+  // ── Back / breadcrumb ──────────────────────────────────────────────────────
+  if (['back','go back','← back','‹ back'].some(k => tL === k || tL.startsWith('back to')))
+    return { category: 'back_nav',      purpose: `Go back: "${t}"`, confidence: 0.92 };
+
+  // ── Generic buttons — at least name what the button says ─────────────────
+  if ((tag === 'button' || tag === 'a') && t.length > 1 && t.length < 80) {
+    // Detect if it looks like a navigation link
+    if (href && !href.startsWith('#') && !href.startsWith('javascript')) {
+      return { category: 'link',        purpose: `Link to "${t}" (${href.length > 40 ? href.substring(0, 40) + '…' : href})`, confidence: 0.72 };
     }
-    return { category: 'form_input', purpose: `Input field: "${ph || t}"`, confidence: 0.8 };
+    return { category: 'button',        purpose: `Button: "${t}" — click to activate`, confidence: 0.70 };
   }
 
-  // Generic button with text
-  if (el.id && el.id.startsWith('BTN') && t.length > 1) {
-    return { category: 'action_button', purpose: `Triggers "${t}" action`, confidence: 0.75 };
+  // ── Select / combobox ──────────────────────────────────────────────────────
+  if (tag === 'select' || tag === 'combobox') {
+    return { category: 'select',        purpose: `Dropdown selector: "${t || ph || 'select an option'}"`, confidence: 0.88 };
   }
 
-  // Links with meaningful text
-  if (el.id && el.id.startsWith('LNK') && t.length > 1 && t.length < 60) {
-    return { category: 'link', purpose: `Navigates to "${t}"`, confidence: 0.75 };
-  }
+  // ── Checkbox / radio ───────────────────────────────────────────────────────
+  if (type === 'checkbox')
+    return { category: 'checkbox',      purpose: `Checkbox: "${t || aria}" — toggles selection`, confidence: 0.87 };
+  if (type === 'radio')
+    return { category: 'radio',         purpose: `Radio option: "${t || aria}"`, confidence: 0.87 };
 
   return null;
 }
 
-// ── Detect page purpose from URL + visible elements ──────────────────────────
+// ── Detect page purpose from URL + visible elements ───────────────────────────
 function classifyPagePurpose(url, title, elements) {
   const u = url.toLowerCase();
   const t = (title || '').toLowerCase();
   const texts = elements.map(e => (e.text || '').toLowerCase()).join(' ');
+  const ph    = elements.map(e => (e.placeholder || '').toLowerCase()).join(' ');
+  const allText = texts + ' ' + ph;
 
-  if (u.includes('/jobs') || texts.includes('easy apply') || texts.includes('job description')) {
-    return 'job_listing_or_search';
-  }
-  if (u.includes('/messaging') || u.includes('/messages') || texts.includes('compose') || texts.includes('type a message')) {
-    return 'messaging';
-  }
-  if (u.includes('/search') || texts.includes('results for') || texts.includes('filters')) {
-    return 'search_results';
-  }
-  if (u.includes('/feed') || u.includes('/home') || texts.includes('share a post') || texts.includes('start a post')) {
-    return 'social_feed';
-  }
-  if (u.includes('/login') || u.includes('/signin') || u.includes('/signup') || texts.includes('sign in') || texts.includes('create account')) {
-    return 'auth';
-  }
-  if (u.includes('/apply') || texts.includes('submit application') || texts.includes('application submitted')) {
+  // Specific page patterns — most specific first
+  if (u.includes('/apply') || allText.includes('submit application') || allText.includes('application submitted'))
     return 'application_form';
-  }
-  if (u.includes('/profile') || u.includes('/in/') || texts.includes('connect') || texts.includes('follow')) {
+  if (u.includes('/checkout') || allText.includes('order total') || allText.includes('place order'))
+    return 'checkout';
+  if (u.includes('/cart') || allText.includes('shopping cart') || allText.includes('your basket'))
+    return 'shopping_cart';
+  if (u.includes('/jobs') || u.includes('/job/') || allText.includes('easy apply') || allText.includes('job description'))
+    return 'job_listing';
+  if (u.includes('/jobs/search') || u.includes('/jobs?') || (u.includes('indeed') && u.includes('q=')) || (u.includes('linkedin') && u.includes('jobs')))
+    return 'job_search_results';
+  if (u.includes('/messaging') || u.includes('/messages') || u.includes('/inbox') || allText.includes('type a message') || allText.includes('compose'))
+    return 'messaging';
+  if ((u.includes('/search') || u.includes('?q=') || u.includes('?search=') || allText.includes('results for')) && !u.includes('jobs'))
+    return 'search_results';
+  if (u.includes('/feed') || u.includes('/home') || allText.includes('share a post') || allText.includes('start a post') || allText.includes("what's on your mind"))
+    return 'social_feed';
+  if (u.includes('/watch') || u.includes('/video/') || allText.includes('subscribe') && allText.includes('views'))
+    return 'video_player';
+  if (u.includes('youtube.com') && !u.includes('/watch'))
+    return 'video_feed';
+  if (u.includes('/login') || u.includes('/signin') || u.includes('/signup') || u.includes('/register') || allText.includes('sign in to') || allText.includes('create account'))
+    return 'auth_page';
+  if (u.includes('/profile') || u.includes('/in/') || allText.includes('connect') && allText.includes('message') && allText.includes('follow'))
     return 'user_profile';
-  }
-  if (u.includes('/company') || texts.includes('about') && texts.includes('employees')) {
+  if (u.includes('/company/') || (allText.includes('about') && allText.includes('employees') && allText.includes('follow')))
     return 'company_page';
-  }
-  if (texts.includes('add to cart') || texts.includes('buy now') || texts.includes('checkout')) {
-    return 'ecommerce';
-  }
+  if (u.includes('/product/') || u.includes('/dp/') || allText.includes('add to cart') || allText.includes('buy now'))
+    return 'product_listing';
+  if (u.includes('/settings') || u.includes('/preferences') || u.includes('/account'))
+    return 'settings';
+  if (u.includes('/notifications'))
+    return 'notifications';
+
+  // Domain-level fallbacks
+  if (u.includes('google.com')) return 'google_homepage_or_search';
+  if (u.includes('youtube.com')) return 'youtube';
+  if (u.includes('linkedin.com')) return 'linkedin_general';
+  if (u.includes('github.com')) return 'github';
+  if (u.includes('twitter.com') || u.includes('x.com')) return 'twitter_feed';
+  if (u.includes('gmail.com') || u.includes('mail.google.com')) return 'gmail';
+  if (u.includes('amazon.')) return 'amazon_general';
+
   return 'general';
 }
 
-// ── Detect what flows exist on a page ────────────────────────────────────────
+// ── Detect what flows exist on a page ─────────────────────────────────────────
 function detectFlows(elements) {
   const flows = {};
-  const hasPurpose = (cat) => elements.some(e => e._exploration?.category === cat);
+  const cats  = new Set(elements.map(e => e._exploration?.category).filter(Boolean));
 
-  if (hasPurpose('apply_button') && hasPurpose('form_input')) {
+  if (cats.has('apply_button'))
     flows.apply_job = ['click apply_button', 'fill form_inputs', 'click submit'];
-  }
-  if (hasPurpose('search_input')) {
-    flows.search = ['type in search_input', 'press_enter or click search button', 'read results'];
-  }
-  if (hasPurpose('auth')) {
-    flows.login = ['click auth button', 'fill email + password', 'submit'];
-  }
-  if (hasPurpose('filter')) {
+  if (cats.has('search_input'))
+    flows.search = ['type in search_input', 'press Enter or click search_submit', 'read results'];
+  if (cats.has('auth_login'))
+    flows.login = ['click auth_login button', 'fill auth_email_input + auth_password_input', 'click submit'];
+  if (cats.has('filter_open') || cats.has('filter_chip') || cats.has('filter_sort'))
     flows.filter_results = ['click filter control', 'select option', 'observe updated results'];
-  }
-  if (hasPurpose('dismiss')) {
-    flows.dismiss_popup = ['click dismiss button'];
-  }
+  if (cats.has('dismiss') || cats.has('cookie_accept'))
+    flows.dismiss_popup = ['click dismiss or cookie_accept button first before any other action'];
+  if (cats.has('ecom_add_cart'))
+    flows.purchase = ['click ecom_add_cart', 'go to cart', 'checkout', 'ecom_confirm'];
+  if (cats.has('create_post'))
+    flows.post_content = ['click create_post', 'type in input_message', 'click submit'];
+  if (cats.has('message'))
+    flows.send_message = ['click message button', 'type in input_message', 'click submit'];
 
   return flows;
 }
 
-// ── Main exploration function ────────────────────────────────────────────────
-/**
- * Explore a page represented by a DOM graph.
- * Returns enriched graph with element purposes + page knowledge.
- * Pure heuristic — zero LLM calls. Fast.
- */
+// ── Build a compact, LLM-readable page summary ────────────────────────────────
+// This is what goes INTO the agent's contextual step so it can make smart decisions
+function buildPageSummary(enrichedElements, pageKnowledge) {
+  if (!enrichedElements) return '';
+
+  // Priority groups — what the agent MUST know about
+  const PRIORITY_CATS = [
+    'dismiss','cookie_accept',       // Always first — blockers
+    'auth_login','auth_signup',       // Login walls
+    'search_input','search_submit',   // Search
+    'apply_button',                   // Job apply
+    'filter_open','filter_chip','filter_sort', // Filters
+    'submit',                         // Forms
+    'nav_jobs','nav_home','nav_messages','nav_profile', // Navigation
+    'load_more','pagination',         // More content
+  ];
+
+  const byCategory = {};
+  for (const el of enrichedElements) {
+    const cat = el._exploration?.category;
+    if (!cat || !el._exploration?.purpose) continue;
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(el);
+  }
+
+  const lines = [];
+
+  // 1. Page context
+  if (pageKnowledge?.purpose) {
+    lines.push(`PAGE TYPE: ${pageKnowledge.purpose}`);
+  }
+
+  // 2. Critical blockers first
+  const blockers = [];
+  if (byCategory['cookie_accept']?.length) blockers.push(`Cookie/privacy banner present — must accept before interacting`);
+  if (byCategory['dismiss']?.length) blockers.push(`Modal/popup present — may need dismissing`);
+  if (pageKnowledge?.blockers?.has_login_wall) blockers.push(`LOGIN WALL — user must authenticate first`);
+  if (blockers.length) lines.push(`⚠ BLOCKERS: ${blockers.join('; ')}`);
+
+  // 3. Available flows
+  if (pageKnowledge?.flows && Object.keys(pageKnowledge.flows).length > 0) {
+    lines.push(`AVAILABLE FLOWS: ${Object.keys(pageKnowledge.flows).join(', ')}`);
+  }
+
+  // 4. Key elements (priority categories first, then others)
+  lines.push('INTERACTIVE ELEMENTS:');
+  const printed = new Set();
+
+  const printCat = (cat) => {
+    if (!byCategory[cat]) return;
+    for (const el of byCategory[cat].slice(0, 3)) {
+      const purpose = el._exploration?.purpose || '';
+      const label   = el.text ? ` "${el.text.substring(0, 40)}"` : (el.placeholder ? ` [${el.placeholder.substring(0, 30)}]` : '');
+      lines.push(`  ${el.id} (${cat})${label} → ${purpose}`);
+      printed.add(el.id);
+    }
+  };
+
+  // Priority categories
+  for (const cat of PRIORITY_CATS) printCat(cat);
+
+  // Remaining classified elements (max 12 total lines)
+  let remaining = 12 - printed.size;
+  for (const el of enrichedElements) {
+    if (remaining <= 0) break;
+    if (printed.has(el.id) || !el._exploration?.category) continue;
+    const purpose = el._exploration?.purpose || '';
+    const label   = el.text ? ` "${el.text.substring(0, 40)}"` : (el.placeholder ? ` [${el.placeholder.substring(0, 30)}]` : '');
+    lines.push(`  ${el.id} (${el._exploration.category})${label} → ${purpose}`);
+    printed.add(el.id);
+    remaining--;
+  }
+
+  // 5. Unclassified interactable elements (brief list)
+  const unclassified = enrichedElements
+    .filter(e => !printed.has(e.id) && (e.text || e.placeholder) && e.id)
+    .slice(0, 6);
+  if (unclassified.length) {
+    lines.push('OTHER ELEMENTS:');
+    for (const el of unclassified) {
+      const label = el.text ? `"${el.text.substring(0, 40)}"` : `[${(el.placeholder||'').substring(0, 30)}]`;
+      lines.push(`  ${el.id} (${el.tag}) ${label}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ── Main exploration function ─────────────────────────────────────────────────
 async function explorePage({ graph, domain }) {
   if (!graph || !graph.elements) return null;
 
@@ -181,14 +406,15 @@ async function explorePage({ graph, domain }) {
   const flows = detectFlows(enrichedElements);
 
   // 4. Extract structured element groups
-  const searchInputs  = enrichedElements.filter(e => e._exploration?.category === 'search_input');
-  const applyButtons  = enrichedElements.filter(e => e._exploration?.category === 'apply_button');
-  const formInputs    = enrichedElements.filter(e => e._exploration?.category === 'form_input');
-  const dismissBtns   = enrichedElements.filter(e => e._exploration?.category === 'dismiss');
-  const filterCtrls   = enrichedElements.filter(e => e._exploration?.category === 'filter');
-  const authBtns      = enrichedElements.filter(e => e._exploration?.category === 'auth');
-  const navLinks      = enrichedElements.filter(e => e._exploration?.category === 'navigation');
-  const submitBtns    = enrichedElements.filter(e => e._exploration?.category === 'submit');
+  const byCategory = (cat) => enrichedElements.filter(e => e._exploration?.category === cat);
+
+  const searchInputs   = byCategory('search_input');
+  const applyButtons   = byCategory('apply_button');
+  const formInputs     = enrichedElements.filter(e => e._exploration?.category?.startsWith('input_') || e._exploration?.category === 'form_input');
+  const dismissBtns    = [...byCategory('dismiss'), ...byCategory('cookie_accept')];
+  const filterCtrls    = enrichedElements.filter(e => e._exploration?.category?.startsWith('filter_'));
+  const authBtns       = [...byCategory('auth_login'), ...byCategory('auth_signup')];
+  const submitBtns     = byCategory('submit');
 
   // 5. Build the page knowledge record
   const pageKnowledge = {
@@ -197,58 +423,57 @@ async function explorePage({ graph, domain }) {
     purpose: pagePurpose,
     mapped_at: new Date().toISOString(),
     element_counts: {
-      total: enrichedElements.length,
-      search_inputs: searchInputs.length,
-      apply_buttons: applyButtons.length,
-      form_inputs:   formInputs.length,
-      dismiss_btns:  dismissBtns.length,
-      filter_ctrls:  filterCtrls.length,
-      auth_buttons:  authBtns.length,
+      total:           enrichedElements.length,
+      classified:      enrichedElements.filter(e => e._exploration).length,
+      search_inputs:   searchInputs.length,
+      apply_buttons:   applyButtons.length,
+      form_inputs:     formInputs.length,
+      dismiss_btns:    dismissBtns.length,
+      filter_ctrls:    filterCtrls.length,
+      auth_buttons:    authBtns.length,
     },
     key_elements: {
-      search_inputs:  searchInputs.map(e  => ({ id: e.id, text: e.text, placeholder: e.placeholder })),
-      apply_buttons:  applyButtons.map(e  => ({ id: e.id, text: e.text })),
-      dismiss_buttons:dismissBtns.map(e   => ({ id: e.id, text: e.text })),
-      form_inputs:    formInputs.map(e    => ({ id: e.id, placeholder: e.placeholder, text: e.text })),
-      submit_buttons: submitBtns.map(e    => ({ id: e.id, text: e.text })),
-      auth_buttons:   authBtns.map(e      => ({ id: e.id, text: e.text })),
-      filters:        filterCtrls.map(e   => ({ id: e.id, text: e.text })),
+      search_inputs:   searchInputs.map(e => ({ id: e.id, text: e.text, placeholder: e.placeholder })),
+      apply_buttons:   applyButtons.map(e => ({ id: e.id, text: e.text })),
+      dismiss_buttons: dismissBtns.map(e => ({ id: e.id, text: e.text })),
+      form_inputs:     formInputs.map(e  => ({ id: e.id, placeholder: e.placeholder, text: e.text, category: e._exploration?.category })),
+      submit_buttons:  submitBtns.map(e  => ({ id: e.id, text: e.text })),
+      auth_buttons:    authBtns.map(e    => ({ id: e.id, text: e.text })),
+      filters:         filterCtrls.map(e => ({ id: e.id, text: e.text })),
     },
     flows,
     blockers: {
       has_login_wall:    authBtns.length > 0 && (url.includes('login') || url.includes('signin')),
-      has_cookie_banner: dismissBtns.some(e => (e.text || '').toLowerCase().includes('accept') || (e.text || '').toLowerCase().includes('cookie')),
+      has_cookie_banner: dismissBtns.some(e => /(accept|cookie|privacy|agree)/i.test(e.text || '')),
       has_popup:         dismissBtns.length > 0,
     },
   };
 
+  // 6. Build compact LLM-readable summary (injected into contextualStep)
+  pageKnowledge.llm_summary = buildPageSummary(enrichedElements, pageKnowledge);
+
   return {
     pageKnowledge,
     enrichedElements,
-    domain: domain || new URL(url.startsWith('http') ? url : 'https://' + url).hostname,
+    domain: domain || (url.startsWith('http') ? new URL(url).hostname : url.split('/')[0]),
   };
 }
 
-// ── Behavioral Learning: record what happened after each action ───────────────
-/**
- * Called after every action in the executor.
- * Records: element → what happened → what appeared.
- * Builds up: "on linkedin.com, BTN Easy Apply always opens application modal"
- */
+// ── Behavioral Learning ───────────────────────────────────────────────────────
 function buildBehaviorRecord({ domain, url, elementId, elementText, elementCategory, action, resultUrl, resultPagePurpose, resultElementsAppeared }) {
   return {
     domain,
-    url_pattern: url.replace(/\/\d+\/?/g, '/:id/').replace(/[?#].*$/, ''), // normalize IDs and query strings
+    url_pattern: url.replace(/\/\d+\/?/g, '/:id/').replace(/[?#].*$/, ''),
     element: { id: elementId, text: elementText, category: elementCategory },
     action,
     result: {
-      url_changed:      resultUrl !== url,
-      result_url:       resultUrl,
-      result_purpose:   resultPagePurpose,
-      appeared:         resultElementsAppeared.slice(0, 8).map(e => ({ id: e.id, text: e.text, category: e._exploration?.category })),
+      url_changed:    resultUrl !== url,
+      result_url:     resultUrl,
+      result_purpose: resultPagePurpose,
+      appeared:       (resultElementsAppeared || []).slice(0, 8).map(e => ({ id: e.id, text: e.text, category: e._exploration?.category })),
     },
     recorded_at: new Date().toISOString(),
   };
 }
 
-module.exports = { explorePage, classifyElementPurpose, classifyPagePurpose, detectFlows, buildBehaviorRecord };
+module.exports = { explorePage, classifyElementPurpose, classifyPagePurpose, detectFlows, buildPageSummary, buildBehaviorRecord };

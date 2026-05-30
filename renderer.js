@@ -395,7 +395,6 @@ async function handleChatSubmit() {
       conversationHistory
     );
 
-    // streamDiv is set by the streaming handler — if it was used, content is already rendered
     const alreadyStreamed = !!streamDiv;
     const replyText = (streamDiv?.textContent || chatResponse?.args?.text || '').trim();
     streamDiv = null;
@@ -409,38 +408,24 @@ async function handleChatSubmit() {
       'help you','assist you','find','search','navigate','go to','look for',
       'lead','leads','job','jobs','apply','send','message','book','order',
     ];
-    const replyLower = replyText.toLowerCase();
-    const inputLower = goalText.toLowerCase();
-    const combinedLower = replyLower + ' ' + inputLower;
+    const replyLower  = replyText.toLowerCase();
+    const combinedLower = replyLower + ' ' + goalText.toLowerCase();
 
     const siteInReplyOrInput = SITE_NAMES.some(s => combinedLower.includes(s));
     const taskInReply        = TASK_SIGNALS.some(t => replyLower.includes(t));
 
     if (siteInReplyOrInput && taskInReply) {
-      // Strip disclaimers, show only the useful part — but ONLY if streaming didn't already render it
-      const disclaimerPhrases = [
-        /i('ll need to clarify|'m a browser[- ]based)[^.]*\./gi,
-        /i can only provide general guidance[^.]*\./gi,
-        /\(and by the way[^)]*\)/gi,
-        /i don'?t have (direct )?access[^.]*\./gi,
-      ];
-      let cleanReply = replyText;
-      for (const rx of disclaimerPhrases) cleanReply = cleanReply.replace(rx, '').trim();
-      cleanReply = cleanReply.replace(/\n{3,}/g, '\n\n').trim();
-
-      if (!alreadyStreamed && cleanReply) {
-        appendAiMessage(cleanReply);
-      }
-      pushToHistory(goalText, cleanReply || replyText);
-
+      // ── SILENT ESCALATION ───────────────────────────────────────────────────────
+      // Don't show the chat model's response (it may have had a question we
+      // can't wait on mid-stream). gatherMissingInfo inside handleTaskExecution
+      // will ask for anything actually missing via a proper inline prompt.
       const badge = document.querySelector('.intent-badge');
       if (badge) { badge.textContent = 'TASK'; badge.className = 'intent-badge intent-task'; }
-      appendAiMessage(`<em style="opacity:0.6;font-size:0.85em">↳ Escalated to task mode</em>`);
       await handleTaskExecution(goalText);
       return;
     }
 
-    // Pure chat
+    // Pure chat — no browser task detected
     if (!alreadyStreamed && replyText) appendAiMessage(replyText);
     pushToHistory(goalText, replyText);
     return;
@@ -641,12 +626,39 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
     tpp.setStep(currentStepIdx);
     let actionCount = 0;
 
+    // ── Fast URL satisfaction check ────────────────────────────────────────
+    // If the step says "open/navigate/go to X" and we’re ALREADY on X,
+    // skip immediately. Stops the YouTube-5x loop.
+    const stepL = currentStep.toLowerCase();
+    const wvNow = getActiveWebview();
+    const urlNow0 = (wvNow && wvNow.src) ? wvNow.src.toLowerCase() : '';
+    const isNavStep = /open|navigate|go to|visit|browse to/.test(stepL);
+    const DOMAIN_MAP = {
+      youtube:'youtube.com', google:'google.com', gmail:'gmail.com',
+      amazon:'amazon.', linkedin:'linkedin.com', twitter:'twitter.com',
+      github:'github.com', reddit:'reddit.com', netflix:'netflix.com',
+      spotify:'spotify.com', notion:'notion.so', slack:'slack.com',
+      discord:'discord.com', instagram:'instagram.com', facebook:'facebook.com',
+    };
+    if (isNavStep) {
+      const alreadyThere = Object.entries(DOMAIN_MAP).some(
+        ([name, domain]) => stepL.includes(name) && urlNow0.includes(domain)
+      );
+      if (alreadyThere) {
+        appendAiMessage(`✓ Already on correct page — skipping "${currentStep}"`);
+        tpp.stepDone(currentStepIdx);
+        currentStepIdx++;
+        previousActions = [`Already on correct page. Skipped navigation step.`];
+        continue; // outer while — go to next step
+      }
+    }
 
     while (!isComplete && actionCount < MAX_ACTIONS_PER_STEP) {
       actionCount++;
       try {
         const wv = getActiveWebview();
         const urlBefore = wv.src || '';
+
 
         // ── ALWAYS refresh DOM before asking LLM what to do ──────────────
         await refreshActiveGraph(wv);
@@ -660,12 +672,16 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
         tpp.incrementAction(currentStepIdx);
 
 
-        // Tell the agent EXACTLY what's on screen + the full original goal for context
-        const contextualStep = `ORIGINAL GOAL: ${enrichedGoal}
-CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
-[You are currently on: ${activeGraph.url}]
-[Page type: ${activeGraph.semanticPattern || 'Unknown'}]
-[Page title: ${activeGraph.title || 'Unknown'}]`;
+        // Build rich page context — exploration summary + step context
+        const pageSummary = activeGraph._exploration?.llm_summary || '';
+        const contextualStep = [
+          `ORIGINAL GOAL: ${executorGoal}`,
+          `CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}`,
+          `CURRENT URL: ${activeGraph.url}`,
+          `PAGE TITLE: ${activeGraph.title || 'Unknown'}`,
+          pageSummary ? `\n${pageSummary}` : `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`,
+          previousActions.length ? `\nRECENT ACTIONS:\n${previousActions.slice(-4).map(a => '  - ' + a).join('\n')}` : '',
+        ].filter(Boolean).join('\n');
 
         streamDiv = null;
         const agentResponse = await window.electronAPI.agentChat(
