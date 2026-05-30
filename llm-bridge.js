@@ -143,7 +143,10 @@ async function chatAgentWithLLM(promptText, graph, previousActions = [], sender,
 - Visible page text: ${textContent || '(none captured)'}
 - Visible links/buttons: ${linkLabels || '(none)'}
 - Interactive elements (${interactiveEls.length} total):
-${interactiveEls.slice(0, 15).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}`;
+${interactiveEls.slice(0, 15).map(e => {
+  const val = e.value ? ` [current value: "${e.value}"]` : '';
+  return `  [${e.id}] "${e.text || ''}"${val} — ${e.predictedEffect || e.role || ''}`;
+}).join('\n')}`;
   }
 
   // Chat system prompt: minimal by default, expanded only when page context is attached

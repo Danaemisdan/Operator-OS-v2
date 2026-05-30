@@ -542,18 +542,17 @@ Max 2 questions. Return [] if the goal is specific enough to start.
 Return ONLY a JSON array of question strings, nothing else.`;
 
     try {
-      // ── Suppress stream rendering so [] never leaks into chat ────────────────────────
+      // Use silent mode — we only want the raw text, no stream rendering
       const _savedStream = streamDiv;
-      streamDiv = { _suppress: true, textContent: '' }; // fake div absorbs stream tokens
+      streamDiv = null;
       const resp = await window.electronAPI.agentChat(
         gatherPrompt,
         { url: '', title: '', elements: [] },
-        [], '', []
+        [], '', [], true  // silent=true: suppresses stream tokens
       );
-      // Grab the response text from the absorbed stream or resp
-      const text = streamDiv._suppress ? (streamDiv.textContent || resp?.args?.text || '[]') : (resp?.args?.text || '[]');
-      streamDiv = _savedStream; // restore
-      // ───────────────────────────────────────────────────────────────
+      streamDiv = _savedStream;
+      // resp.args.text = raw LLM output (could be "[]" or "[\"question\"]")  
+      const text = (resp?.args?.text || resp?.text || '[]').trim();
       const match = text.match(/\[[\s\S]*?\]/);
       if (!match) return goal;
       const questions = JSON.parse(match[0]);
@@ -906,13 +905,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
             const domAfter = JSON.stringify(activeGraph.elements);
 
             let outcome = `Executed ${action} on ${targetId}. `;
-            if (action === 'type') outcome += `Typed "${(args.text || '').substring(0,60)}". `;
+            if (action === 'type') {
+              outcome += `Typed "${(args.text || '').substring(0, 60)}" into ${targetId}. `;
+              outcome += `FIELD ${targetId} NOW CONTAINS: "${(args.text || '')}". DO NOT type into this field again. Next action should be press_enter to submit, or click the search/submit button.`;
+            }
             if (urlNow !== urlBefore) {
               outcome += `URL changed to ${urlNow}. `;
-            } else if (domBefore !== domAfter) {
+            } else if (action !== 'type' && domBefore !== domAfter) {
               outcome += `DOM changed (content updated/modal/autocomplete appeared). `;
-            } else {
-              outcome += `Nothing visually changed. `;
             }
 
             previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
