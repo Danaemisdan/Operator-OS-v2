@@ -23,6 +23,11 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `2. When no specific site is named, navigate to a relevant search engine and search there.\n` +
     `3. Step descriptions should be plain English actions: "navigate to X", "search for Y", "click the search result".\n` +
     `   Never put raw URLs in step text — navigate steps just say the site name.\n\n` +
+    `CLARIFYING QUESTIONS — before planning, decide if critical info is missing:\n` +
+    `Ask ONLY when the missing info changes which site to visit or what to type into a search.\n` +
+    `Examples worth asking: budget range for shopping, job role or location for job search, travel dates for booking.\n` +
+    `Never ask about: how to do the task, aesthetic preferences, anything a reasonable default covers.\n` +
+    `Max 2 questions. If goal is specific enough, return questions as empty array.\n\n` +
     `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
     `- searchLeads: returns structured list of people matching a role/industry/location\n` +
     `- lookupCompany: returns structured data about a named company\n` +
@@ -33,12 +38,11 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `  YES → set research_needed=true and choose the right skill\n` +
     `  NO  → set research_needed=false and just plan browser steps\n\n` +
     `JSON output format:\n` +
-    `No research: {"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n` +
-    `With research: {"research_needed":true,"research_skill":"skillName","research_args":{...},"steps":[...]}\n\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n\n` +
     `Goal: "${goal}"\n` +
     `Current page: ${currentUrl || 'New tab'}\n` +
     `Available skills (executor can use these directly for common tasks): ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
-    `Output ONLY JSON: {"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[...]}`;
+    `Output ONLY JSON: {"questions":[],"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[]}`;
 
 
   const body = JSON.stringify({
@@ -145,6 +149,7 @@ function parseSteps(full, goal) {
           .filter(s => s.length > 3 && s !== '[object Object]');
         if (steps.length > 0) return {
           steps,
+          questions: Array.isArray(obj.questions) ? obj.questions.filter(q => typeof q === 'string' && q.length > 3) : [],
           current: 0,
           research_needed:  obj.research_needed === true,
           research_skill:   obj.research_skill   || null,
@@ -161,10 +166,10 @@ function parseSteps(full, goal) {
     .filter(l => /^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i.test(l))
     .map(l => l.replace(/^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i, '').trim())
     .filter(l => l.length > 5);
-  if (numbered.length > 0) return { steps: numbered, current: 0, research_needed: false, research_skill: null, research_args: null };
+  if (numbered.length > 0) return { steps: numbered, questions: [], current: 0, research_needed: false, research_skill: null, research_args: null };
 
   // Final fallback: treat the whole goal as a single step
-  return { steps: [goal], current: 0, research_needed: false, research_skill: null, research_args: null };
+  return { steps: [goal], questions: [], current: 0, research_needed: false, research_skill: null, research_args: null };
 }
 
 /**

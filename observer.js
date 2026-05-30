@@ -14,59 +14,58 @@ const http = require('http');
 async function observePageState({ graph, lastAction, expectation, goalContext }) {
   const url = graph.url || '';
   const title = graph.title || '';
+  const els = graph.elements || [];
 
-  const interactiveEls = (graph.elements || []).filter(e =>
-    e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
-  );
-  const textEls = (graph.elements || []).filter(e =>
-    e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 120
-  );
-  const visibleTexts = textEls.slice(0, 10).map(e => `"${e.text}"`).join(', ');
+  // Selective context — give the LLM what matters, not raw noise
+  // Buttons and inputs: what can be interacted with
+  const interactiveEls = els
+    .filter(e => e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK')))
+    .slice(0, 20)
+    .map(e => {
+      const val = e.value ? ` [value: "${e.value}"]` : '';
+      return `  [${e.id}] "${e.text || ''}"${val} — ${e.predictedEffect || e.role || e.tag || ''}`;
+    }).join('\n');
 
-  // ── Heuristic blockers (no LLM needed) ───────────────────────────────────────
-  const allText = (graph.elements || []).map(e => (e.text || '').toLowerCase()).join(' ');
-  const blockers = [];
-
-  if (allText.includes('sign in') || allText.includes('log in') || allText.includes('create account')) {
-    if (url.includes('accounts.') || url.includes('login') || url.includes('signin')) {
-      blockers.push('login_required');
-    }
-  }
-  if (allText.includes('captcha') || allText.includes("i'm not a robot") || allText.includes('verify you')) {
-    blockers.push('captcha_detected');
-  }
-  if (allText.includes('cookie') && (allText.includes('accept') || allText.includes('agree'))) {
-    blockers.push('cookie_banner');
-  }
-  if (allText.includes('before you continue') || allText.includes('consent')) {
-    blockers.push('consent_dialog');
-  }
+  // Visible text — what the user is actually reading
+  const visibleText = els
+    .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
+    .slice(0, 12)
+    .map(e => e.text.trim())
+    .join(' | ');
 
   // ── Build observer prompt ─────────────────────────────────────────────────────
-  const prompt = `You are an Observer AI. Your ONLY job is to describe the current state of a webpage after an action was taken.
-You do NOT plan. You do NOT decide what to do next. You ONLY report what you see.
+  // Give the LLM selective context — what's visible + what can be clicked.
+  // Let IT reason about blockers from actual content, not hardcoded text matching.
+  const prompt = `You are an Observer AI. Describe the current page state after an action. Be objective and factual.
 
-Goal context: ${goalContext || 'Unknown'}
-Last action taken: ${lastAction || 'None'}
+User's goal: ${goalContext || 'Unknown'}
+Last action: ${lastAction || 'None'}
 Expected result: ${expectation || 'Unknown'}
 
-Current page state:
+Current page:
 - URL: ${url}
 - Title: ${title}
-- Visible text: ${visibleTexts || 'none'}
-- Interactive elements (${interactiveEls.length}):
-${interactiveEls.slice(0, 15).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}
-${blockers.length > 0 ? `\nDetected blockers: ${blockers.join(', ')}` : ''}
+- Visible text on page: ${visibleText || '(none)'}
+- Interactive elements:
+${interactiveEls || '(none)'}
 
-Answer ONLY with this JSON (no other text):
+IMPORTANT REASONING RULES:
+- If the goal does NOT require signing in, a sign-in/login prompt is a blocker to DISMISS (close it), not to fill in.
+- Look for a close/dismiss/✕ button on any modal or overlay — that is always the right way to handle soft gates.
+- If the last action had NO effect (URL unchanged, content unchanged), that means the action failed — report action_succeeded=false.
+- Read the visible text carefully to understand what type of page/modal this is. Do not guess from single words.
+- Blockers are things that prevent reaching the goal. Examples: hard login wall (no bypass), CAPTCHA, access denied. NOT examples: sign-in suggestion modal with a close button, cookie notice with dismiss option.
+
+Answer ONLY with this JSON:
 {
   "state": "machine_readable_state_name",
-  "what_changed": "one sentence: what visibly changed after the action",
+  "what_changed": "one sentence describing what actually changed after the action, or 'nothing changed' if nothing did",
   "action_succeeded": true_or_false,
-  "blockers": ${JSON.stringify(blockers)},
+  "blockers": ["only list genuine hard blockers with no dismiss option, empty array if dismissable or no blocker"],
   "confidence": 0.0_to_1.0,
-  "next_hint": "one sentence: what the planner should try next"
+  "next_hint": "one specific sentence: what should happen next to make progress toward the goal"
 }`;
+
 
   return new Promise((resolve) => {
     const body = JSON.stringify({

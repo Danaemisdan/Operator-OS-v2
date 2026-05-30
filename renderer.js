@@ -576,12 +576,27 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
   async function handleTaskExecution(rawGoal) {
-    const enrichedGoal = await gatherMissingInfo(rawGoal);
 
-  // Phase B: decompose enriched goal into steps
+  // Phase A: decompose goal — planner returns steps AND any clarifying questions
   streamDiv = null;
-  const plan = await window.electronAPI.decomposeGoal(enrichedGoal, getActiveWebview().src);
+  const plan = await window.electronAPI.decomposeGoal(rawGoal, getActiveWebview().src);
   if (streamDiv) streamDiv = null;
+
+  // If the planner identified missing info, ask before doing anything
+  let enrichedGoal = rawGoal;
+  if (plan.questions && plan.questions.length > 0) {
+    appendAiMessage(`💡 Quick question${plan.questions.length > 1 ? 's' : ''} before I start:`);
+    for (const q of plan.questions.slice(0, 2)) {
+      const answer = await askUser(q);
+      enrichedGoal += `\n[${q}: ${answer}]`;
+      appendAiMessage(`✓ Got it: **${answer}**`);
+    }
+    // Replan with the enriched goal so steps reflect the user's answers
+    streamDiv = null;
+    const refinedPlan = await window.electronAPI.decomposeGoal(enrichedGoal, getActiveWebview().src);
+    if (streamDiv) streamDiv = null;
+    Object.assign(plan, refinedPlan);
+  }
 
   // ── Research Gate: run research skill BEFORE browser steps if Planner flagged it ──
   let researchContext = '';
@@ -670,7 +685,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
         if (stepSkill) {
           appendAiMessage(`⚡ **${stepSkill.name}** — executing step`);
           const wcId = wv?.getWebContentsId?.() || 0;
-          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, currentStep, wcId, activeGraph || null);
+          // Use enrichedGoal (user's actual intent) for arg extraction, NOT the step text.
+          // The step identifies which skill; the goal says what to search for.
+          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, enrichedGoal, wcId, activeGraph || null);
           if (skillResult?.success !== false) {
             await delay(1500);
             await refreshActiveGraph(wv);
