@@ -578,102 +578,52 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
           isComplete = true; break;
         }
 
+        // ── Extract action details for observer ────────────────────────────
+        const action = agentResponse.tool;
+        const args   = agentResponse.args || {};
+        const expectation = agentResponse.expectation || '';
+        const thought = agentResponse.thought || '';
+
         if (agentResponse.status === 'complete') {
-          // ── REAL VERIFICATION: LLM check to prevent premature completion ──
+          // ── OBSERVER VERIFICATION: use real DOM signals, not just LLM guess ──
           await refreshActiveGraph(wv);
-          appendAiMessage(`🕵️ Verifying completion of: **${plan.steps[currentStepIdx]}**...`);
-          
-          const verifyPrompt = `The agent claims this step is complete: "${plan.steps[currentStepIdx]}".
-Look at the Current Page Context below. Is it actually complete? Did it achieve the goal?
-If YES, extract any relevant data/output requested by the step.
-If NO, explain what is missing.
+          appendAiMessage(`🕵️ Verifying: **${plan.steps[currentStepIdx]}**...`);
 
-Respond ONLY in JSON:
-{
-  "isComplete": true/false,
-  "data": "Extracted data if any, or null",
-  "reason": "Why it is complete or what is missing"
-}`;
-          const vResp = await window.electronAPI.agentChat(verifyPrompt, prunedGraph, [], memory, [], true);
-          let isActuallyComplete = true;
-          let verifyData = agentResponse.extracted_data || null;
-          let verifyReason = "Agent marked complete";
-          
-          try {
-            const vMatch = (vResp?.args?.text || '').match(/\{[\s\S]*\}/);
-            if (vMatch) {
-              const vJson = JSON.parse(vMatch[0]);
-              // Default to true if the model couldn't decide, to avoid infinite loops,
-              // but if it explicitly said false, reject it.
-              if (vJson.isComplete === false) isActuallyComplete = false;
-              if (vJson.data) verifyData = vJson.data;
-              if (vJson.reason) verifyReason = vJson.reason;
-            }
-          } catch(e){}
+          const obs = await window.electronAPI.observePage({
+            graph: activeGraph,
+            lastAction: `${action} ${args.targetId || args.text || ''}`,
+            expectation,
+            goalContext: enrichedGoal,
+          });
 
-          if (!isActuallyComplete) {
-             appendAiMessage(`❌ Verification failed: ${verifyReason}. Resuming step...`);
-             previousActions.push(`Attempted to complete, but verifier said: ${verifyReason}`);
-             continue; // Go back to start of while loop and let agent try again
+          // Hard blockers = cannot be complete
+          if (obs.blockers && obs.blockers.length > 0) {
+            const blockerMsg = obs.blockers.join(', ');
+            appendAiMessage(`⚠️ Blocker detected: **${blockerMsg}**. Resolving before continuing...`);
+            previousActions.push(`BLOCKER: ${blockerMsg}. You MUST resolve this first. ${obs.next_hint}`);
+            continue;
           }
 
-          const verifyNote = verifyData ? `Found: ${verifyData}` : `Verified: ${verifyReason}`;
+          if (!obs.action_succeeded && obs.confidence > 0.7) {
+            appendAiMessage(`❌ Observer: step not complete — ${obs.what_changed}. ${obs.next_hint}`);
+            previousActions.push(`Observer says NOT complete: ${obs.what_changed}. Hint: ${obs.next_hint}`);
+            continue;
+          }
 
-          await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'complete', outcome: 'success', detail: verifyNote });
+          // Step done
+          await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'complete', outcome: 'success', detail: obs.what_changed });
           currentStepIdx++;
           if (currentStepIdx >= plan.steps.length) {
-            appendAiMessage(`✅ **All ${plan.steps.length} steps done!** (${verifyNote})`);
+            appendAiMessage(`✅ **All ${plan.steps.length} steps done!** — ${obs.what_changed}`);
             isComplete = true;
-
-            // ── Auto-write task result to Knowledge Graph ──────────────────
-            // Ask LLM to extract entities (people, companies, URLs) from this task
-            try {
-              const extractPrompt = `The following task was just completed: "${enrichedGoal}"
-Page at completion: ${activeGraph?.url || 'unknown'} (${activeGraph?.semanticPattern || ''})
-Actions taken: ${previousActions.slice(-6).join(' | ')}
-
-Extract entities to store in a knowledge graph. Return ONLY this JSON:
-{
-  "outcome": "one sentence summary of what was accomplished",
-  "entities": [
-    { "type": "person|company|url|note", "name": "...", "rel": "involved|recipient|sender|reference" }
-  ]
-}
-Types: person=a real human, company=an organization, url=a website, note=a key fact.`;
-
-              const resp = await window.electronAPI.agentChat(
-                extractPrompt, { url: '', title: '', elements: [] }, [], '', [], true // silent
-              );
-              const text = resp?.args?.text || '{}';
-              const match = text.match(/\{[\s\S]*\}/);
-              if (match) {
-                const extracted = JSON.parse(match[0]);
-                await window.electronAPI.kgRecordTask({
-                  goal: enrichedGoal,
-                  outcome: extracted.outcome || verifyNote,
-                  status: 'complete',
-                  url: activeGraph?.url || '',
-                  entities: (extracted.entities || []),
-                });
-                if (extracted.entities?.length > 0) {
-                  const names = extracted.entities.map(e => `${e.name} (${e.type})`).join(', ');
-                  appendAiMessage(`🧠 **Stored to Knowledge Graph:** ${names}`);
-                }
-              }
-            } catch (_) {}
           } else {
-            appendAiMessage(`✅ Step ${currentStepIdx} done (${verifyNote}) → **${plan.steps[currentStepIdx]}**`);
-            previousActions = [];
+            appendAiMessage(`✅ Step done (${obs.what_changed}) → **${plan.steps[currentStepIdx]}**`);
+            previousActions = [`Observer summary of last step: ${obs.what_changed}`];
           }
-          break;
-
+          continue;
         }
 
         // ── Execute the action ─────────────────────────────────────────────
-        const thought = agentResponse.thought || '';
-        const expectation = agentResponse.expectation || 'No specific expectation';
-        const action  = agentResponse.tool;
-        const args    = agentResponse.args || {};
         let msg = `<div class="thought-log">🤔 ${thought}<br>🎯 <em>Expects: ${expectation}</em></div>▶️ **${action || 'thinking'}**`;
 
         if (action === 'navigate') {
@@ -694,7 +644,21 @@ Types: person=a real human, company=an organization, url=a website, note=a key f
               await waitForPageLoad(wv);
               await delay(800);
               await refreshActiveGraph(wv);
-              previousActions.push(`Expectation: "${expectation}". Outcome: Navigated to ${navUrl} | now on: ${wv.src}`);
+
+              // ── Observer: fast heuristic blocker check after navigation ────────
+              const navObs = await window.electronAPI.observePage({
+                graph: activeGraph,
+                lastAction: `navigate to ${navUrl}`,
+                expectation,
+                goalContext: enrichedGoal,
+              });
+              if (navObs.blockers && navObs.blockers.length > 0) {
+                const b = navObs.blockers.join(', ');
+                msg += `<br>⚠️ Blocker: <strong>${b}</strong> — ${navObs.next_hint}`;
+                previousActions.push(`Navigated to ${navUrl}. BLOCKER DETECTED: ${b}. You MUST resolve this before doing anything else. ${navObs.next_hint}`);
+              } else {
+                previousActions.push(`Navigated to ${navUrl}. Observer: ${navObs.what_changed}. ${navObs.next_hint}`);
+              }
             }
           }
         } else if (action === 'scroll') {
@@ -779,10 +743,50 @@ Types: person=a real human, company=an organization, url=a website, note=a key f
             }
 
             previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
+
+            // ── Observer: feed real state back to planner after DOM change ─────────
+            if (domBefore !== domAfter || urlNow !== urlBefore) {
+              const actObs = await window.electronAPI.observePage({
+                graph: activeGraph,
+                lastAction: `${action} ${targetId}${action === 'type' ? ' with text: ' + (args.text || '') : ''}`,
+                expectation,
+                goalContext: enrichedGoal,
+              });
+              if (actObs.blockers && actObs.blockers.length > 0) {
+                const b = actObs.blockers.join(', ');
+                appendAiMessage(`⚠️ Blocker appeared: <strong>${b}</strong>`);
+                previousActions.push(`BLOCKER: ${b}. You MUST handle this first. ${actObs.next_hint}`);
+              } else {
+                previousActions.push(`Observer state: ${actObs.state}. ${actObs.what_changed}. Hint: ${actObs.next_hint}`);
+              }
+            }
+
             await window.electronAPI.recordMemory({ goal: currentStep, url: urlBefore, action: `${action} ${targetId}`, outcome: 'success', detail: outcome });
           } else {
-            msg += `<br>⚠️ Element <code>${targetId}</code> not in current DOM.`;
-            previousActions.push(`${targetId} not found in DOM (page: ${activeGraph.url}). Try scrolling or a different element.`);
+            // ── RECOVERY AGENT: element not found — try to find an alternative ──
+            appendAiMessage(`⚠️ <code>${targetId}</code> not in DOM. Calling Recovery Agent...`);
+            const recovery = await window.electronAPI.recoverElement({
+              targetText: el ? el.text : targetId,
+              targetId,
+              currentElements: activeGraph.elements,
+              goal: currentStep,
+              siteMemory: `Domain: ${activeGraph.url}`,
+            });
+            if (recovery.found && recovery.target_id) {
+              appendAiMessage(`🔧 Recovery found alternative: <code>${recovery.target_id}</code> ("${recovery.target_text}") — ${recovery.reasoning}`);
+              // Re-run the action on the recovered element
+              const recEl = activeGraph.elements.find(e => e.id === recovery.target_id);
+              if (recEl && recEl.position) {
+                const rx = Math.round(recEl.position.x + recEl.position.width / 2);
+                const ry = Math.round(recEl.position.y + recEl.position.height / 2);
+                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x: rx, y: ry } });
+                await waitForPageLoad(wv, 4000);
+                await refreshActiveGraph(wv);
+                previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
+              }
+            } else {
+              previousActions.push(`${targetId} not found, Recovery Agent found no substitute. Try a different approach or scroll to find it.`);
+            }
           }
 
         } else if (action === 'press_enter') {

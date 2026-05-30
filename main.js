@@ -13,6 +13,7 @@ const { decomposeGoal } = require('./manager-agent.js');
 const { pruneGraph } = require('./dom-pruner.js');
 const { recordEpisode, recallRelevant } = require('./memory.js');
 const { researchHeadless } = require('./research-agent.js');
+const { observePageState, recoverMissingElement } = require('./observer.js');
 const kg = require('./knowledge-graph.js');
 
 const downloadDir = path.join(os.homedir(), 'Operator Downloads');
@@ -223,6 +224,26 @@ ipcMain.handle('start-research', async (event, query) => {
     if (!event.sender.isDestroyed()) event.sender.send('research-stream-chunk', token);
   });
   return fullReport;
+});
+
+// --- Observer AI ---
+ipcMain.handle('observe-page', async (event, { graph, lastAction, expectation, goalContext }) => {
+  try {
+    return await observePageState({ graph, lastAction, expectation, goalContext });
+  } catch (e) {
+    console.error('[observe-page] error:', e.message);
+    return { state: 'error', what_changed: 'Observer failed', action_succeeded: false, blockers: [], confidence: 0, next_hint: '' };
+  }
+});
+
+// --- Recovery Agent ---
+ipcMain.handle('recover-element', async (event, { targetText, targetId, currentElements, goal, siteMemory }) => {
+  try {
+    return await recoverMissingElement({ targetText, targetId, currentElements, goal, siteMemory });
+  } catch (e) {
+    console.error('[recover-element] error:', e.message);
+    return { found: false };
+  }
 });
 
 // --- Native Execution Engine Bridge ---

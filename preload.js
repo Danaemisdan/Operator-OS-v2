@@ -41,4 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kgEdge:        (from, to, rel) => ipcRenderer.invoke('kg-edge', { from, to, rel }),
   kgSummary:     ()     => ipcRenderer.invoke('kg-summary'),
   kgRecordTask:  (p)    => ipcRenderer.invoke('kg-record-task', p),
+
+  // ── Observer AI + Recovery Agent ────────────────────────────────────────────
+  observePage:     (p) => ipcRenderer.invoke('observe-page', p),
+  recoverElement:  (p) => ipcRenderer.invoke('recover-element', p),
 });
