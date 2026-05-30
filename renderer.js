@@ -577,6 +577,30 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
   async function handleTaskExecution(rawGoal) {
+
+    // ── Phase 0: Skills fast-path ─────────────────────────────────────────────
+    // Check if a built-in skill covers this goal. If yes, execute it directly.
+    // No LLM, no planning, no questions — deterministic and instant.
+    const matchedSkill = await window.electronAPI.matchSkill(rawGoal);
+    if (matchedSkill) {
+      appendAiMessage(`⚡ **Skill matched:** ${matchedSkill.name} — running directly`);
+      const wv = getActiveWebview();
+      const wcId = wv?.getWebContentsId?.() || 0;
+      const result = await window.electronAPI.executeSkill(
+        matchedSkill.id,
+        rawGoal,
+        wcId,
+        activeGraph || null,
+      );
+      if (result?.success === false) {
+        appendAiMessage(`⚠️ Skill failed (${result.error}) — falling back to full planning`);
+        // fall through to LLM planning below
+      } else {
+        appendAiMessage(`✅ Done via skill: **${matchedSkill.name}**`);
+        return;
+      }
+    }
+
     const enrichedGoal = await gatherMissingInfo(rawGoal);
 
   // Phase B: decompose enriched goal into steps
