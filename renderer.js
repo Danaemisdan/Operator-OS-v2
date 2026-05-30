@@ -537,15 +537,22 @@ Examples of BAD questions: ["What type of leads?", "What message to send?", "Wha
 Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] or []`;
 
     try {
+      // ── Suppress stream rendering so [] never leaks into chat ────────────────────────
+      const _savedStream = streamDiv;
+      streamDiv = { _suppress: true, textContent: '' }; // fake div absorbs stream tokens
       const resp = await window.electronAPI.agentChat(
         gatherPrompt,
         { url: '', title: '', elements: [] },
         [], '', []
       );
-      const text = resp?.args?.text || '[]';
+      // Grab the response text from the absorbed stream or resp
+      const text = streamDiv._suppress ? (streamDiv.textContent || resp?.args?.text || '[]') : (resp?.args?.text || '[]');
+      streamDiv = _savedStream; // restore
+      // ───────────────────────────────────────────────────────────────
       const match = text.match(/\[[\s\S]*?\]/);
       if (!match) return goal;
       const questions = JSON.parse(match[0]);
+
       if (!Array.isArray(questions) || questions.length === 0) return goal;
       // Hard cap: never ask more than 2 questions
       const capped = questions.slice(0, 2);
@@ -1263,6 +1270,12 @@ function appendAiMessage(msg) {
 // This only fires during chat intent where the model streams plain text.
 let streamDiv = null;
 window.electronAPI.onAgentStream((token) => {
+  // If a suppress placeholder is set (e.g. during gatherMissingInfo),
+  // absorb the token silently — never create a chat bubble.
+  if (streamDiv && streamDiv._suppress) {
+    streamDiv.textContent += token;
+    return;
+  }
   if (!streamDiv) {
     streamDiv = document.createElement('div');
     streamDiv.className = 'message ai';
@@ -1368,125 +1381,19 @@ window.addEventListener('mouseup', () => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TASK PROGRESS PANEL (TPP) CONTROLLER
-// Controls the live task progress UI at the bottom of the left panel.
-// Called from the executor loop to show real-time state.
-// ══════════════════════════════════════════════════════════════════════════════
-
-const tpp = (() => {
-  const panel       = document.getElementById('task-progress-panel');
-  const goalLabel   = document.getElementById('tpp-goal-label');
-  const stepsEl     = document.getElementById('tpp-steps');
-  const thoughtEl   = document.getElementById('tpp-thought');
-  const thoughtText = document.getElementById('tpp-thought-text');
-  const observerEl  = document.getElementById('tpp-observer');
-  const obsState    = document.getElementById('tpp-observer-state');
-  const obsHint     = document.getElementById('tpp-observer-hint');
-  const researchEl  = document.getElementById('tpp-research');
-  const researchLbl = document.getElementById('tpp-research-label');
-  const closeBtn    = document.getElementById('tpp-close');
-
-  let _steps = [];
-  let _currentIdx = 0;
-  let _actionCounts = [];
-
-  closeBtn.addEventListener('click', () => hide());
-
-  function show(goal, steps) {
-    _steps = steps;
-    _currentIdx = 0;
-    _actionCounts = steps.map(() => 0);
-    goalLabel.textContent = goal.length > 45 ? goal.substring(0, 42) + '...' : goal;
-    _renderSteps();
-    panel.classList.remove('hidden');
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-  }
-
-  function hide() {
-    panel.classList.add('hidden');
-    thoughtEl.classList.add('hidden');
-    observerEl.classList.add('hidden');
-    researchEl.classList.add('hidden');
-  }
-
-  function _stepIcon(status) {
-    if (status === 'pending')  return '○';
-    if (status === 'running')  return '⬡';
-    if (status === 'done')     return '✓';
-    if (status === 'error')    return '✕';
-    if (status === 'skipped')  return '—';
-    return '○';
-  }
-
-  function _renderSteps() {
-    stepsEl.innerHTML = '';
-    _steps.forEach((step, i) => {
-      const status = i < _currentIdx ? 'done' : i === _currentIdx ? 'running' : 'pending';
-      const div = document.createElement('div');
-      div.className = `tpp-step ${status}`;
-      div.id = `tpp-step-${i}`;
-      div.innerHTML = `
-        <div class="tpp-step-icon">${_stepIcon(status)}</div>
-        <div class="tpp-step-text">${step}</div>
-        <div class="tpp-step-count" id="tpp-count-${i}">${status === 'running' && _actionCounts[i] > 0 ? _actionCounts[i] + ' acts' : ''}</div>
-      `;
-      stepsEl.appendChild(div);
-    });
-  }
-
-  function setStep(idx) {
-    _currentIdx = idx;
-    _renderSteps();
-  }
-
-  function stepDone(idx) {
-    const el = document.getElementById(`tpp-step-${idx}`);
-    if (el) { el.className = 'tpp-step done'; el.querySelector('.tpp-step-icon').textContent = '✓'; }
-  }
-
-  function stepError(idx) {
-    const el = document.getElementById(`tpp-step-${idx}`);
-    if (el) { el.className = 'tpp-step error'; el.querySelector('.tpp-step-icon').textContent = '✕'; }
-  }
-
-  function incrementAction(idx) {
-    _actionCounts[idx] = (_actionCounts[idx] || 0) + 1;
-    const countEl = document.getElementById(`tpp-count-${idx}`);
-    if (countEl) countEl.textContent = _actionCounts[idx] + ' acts';
-  }
-
-  function setThought(text) {
-    if (!text) { thoughtEl.classList.add('hidden'); return; }
-    thoughtText.textContent = text.length > 120 ? text.substring(0, 117) + '...' : text;
-    thoughtEl.classList.remove('hidden');
-  }
-
-  function setObserver(state, hint, isBlocker = false) {
-    if (!state) { observerEl.classList.add('hidden'); return; }
-    obsState.textContent = state.replace(/_/g, ' ').toUpperCase();
-    obsState.className = 'tpp-state-pill' + (isBlocker ? ' blocker' : '');
-    obsHint.textContent = hint || '';
-    observerEl.classList.remove('hidden');
-  }
-
-  function setResearch(running, label) {
-    if (!running) { researchEl.classList.add('hidden'); return; }
-    researchLbl.textContent = label || 'Research Agent running...';
-    researchEl.classList.remove('hidden');
-  }
-
-  function complete() {
-    // Mark all remaining steps as done and auto-hide after delay
-    _steps.forEach((_, i) => stepDone(i));
-    setThought(null);
-    setObserver(null);
-    setResearch(false);
-    setTimeout(() => hide(), 3000);
-  }
-
-  return { show, hide, setStep, stepDone, stepError, incrementAction, setThought, setObserver, setResearch, complete };
-})();
-
-// Expose tpp globally so handleTaskExecution (defined inside handleChatSubmit) can use it
+// ─── TPP STUB ─────────────────────────────────────────────────────────────────
+// The progress panel HTML was removed (user wants all output in chat).
+// These are silent no-ops — the executor still calls tpp.* so we keep the API.
+const tpp = {
+  show:            () => {},
+  hide:            () => {},
+  setStep:         () => {},
+  stepDone:        () => {},
+  stepError:       () => {},
+  incrementAction: () => {},
+  setThought:      () => {},
+  setObserver:     () => {},
+  setResearch:     () => {},
+  complete:        () => {},
+};
 window.tpp = tpp;

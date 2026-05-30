@@ -14,8 +14,15 @@ const http = require('http');
  */
 async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
   const prompt =
-    `You are a task planning agent. Break the user's goal into 2-5 clear, sequential browser steps.\n` +
+    `You are a task planning agent. Break the user's goal into 2-4 clear, sequential browser steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
+    `DIRECT NAVIGATION RULE — for any well-known site, navigate DIRECTLY. NEVER search Google to find it:\n` +
+    `  amazon → https://www.amazon.com | youtube → https://www.youtube.com\n` +
+    `  linkedin → https://www.linkedin.com | twitter/x → https://www.x.com\n` +
+    `  gmail → https://mail.google.com | github → https://github.com\n` +
+    `  reddit → https://www.reddit.com | netflix → https://www.netflix.com\n` +
+    `  spotify → https://www.spotify.com | instagram → https://www.instagram.com\n` +
+    `  facebook → https://www.facebook.com | notion → https://www.notion.so\n\n` +
     `RESEARCH SKILLS AVAILABLE (headless, no browser needed):\n` +
     `- searchLeads: find people matching a role/industry/location\n` +
     `- lookupCompany: get structured info about a company\n` +
@@ -25,20 +32,20 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `STRICT RESEARCH GATE — only set research_needed=true when ALL of these are true:\n` +
     `  1. The goal needs to FIND or GATHER information before any browser action\n` +
     `  2. The user did NOT specify a specific website to go to\n` +
-    `  3. The research result will directly change what browser steps are needed\n` +
-    `If the user says "search LinkedIn for X" → research_needed=false (go to LinkedIn directly)\n` +
-    `If the user says "find me AI startups" → research_needed=true (searchLeads first)\n` +
-    `If the user says "look up Notion" → research_needed=true (lookupApp first)\n` +
-    `If the user says "open YouTube" → research_needed=false (pure navigation)\n\n` +
-    `Example 1 — pure browser task:\n` +
-    `Goal: "Book a flight to Paris"\n` +
-    `Output: {"research_needed":false,"research_skill":null,"research_args":null,"steps":["Navigate to google.com/flights","Search flights to Paris","Select best option and checkout"]}\n\n` +
+    `  3. The research result will directly change what browser steps are needed\n\n` +
+    `STEP RULES:\n` +
+    `- Write steps as plain text with NO leading numbers or prefixes (bad: "1. Open YouTube", good: "Open YouTube")\n` +
+    `- If already on the right page, skip navigation steps\n` +
+    `- Maximum 4 steps. Merge trivial steps.\n\n` +
+    `Example 1 — direct navigation:\n` +
+    `Goal: "find water bottles on amazon"\n` +
+    `Output: {"research_needed":false,"research_skill":null,"research_args":null,"steps":["Navigate to https://www.amazon.com","Search for water bottles","Browse results and pick a good option"]}\n\n` +
     `Example 2 — research first:\n` +
     `Goal: "Find me AI startup leads"\n` +
-    `Output: {"research_needed":true,"research_skill":"searchLeads","research_args":{"role":"founder","industry":"AI","limit":20},"steps":["Use research results to open relevant company pages","Extract contact info from each page"]}\n\n` +
-    `Example 3 — app lookup:\n` +
-    `Goal: "Tell me about Notion pricing"\n` +
-    `Output: {"research_needed":true,"research_skill":"lookupApp","research_args":{"name":"Notion"},"steps":["Navigate to notion.so/pricing if more detail needed"]}\n\n` +
+    `Output: {"research_needed":true,"research_skill":"searchLeads","research_args":{"role":"founder","industry":"AI","limit":20},"steps":["Open relevant company pages from research results","Extract contact info"]}\n\n` +
+    `Example 3 — YouTube:\n` +
+    `Goal: "find nice videos on youtube"\n` +
+    `Output: {"research_needed":false,"research_skill":null,"research_args":null,"steps":["Navigate to https://www.youtube.com","Search for nice videos","Browse and open a video"]}\n\n` +
     `Now plan this goal:\n` +
     `Goal: "${goal}"\n` +
     `Current page: ${currentUrl || 'New tab'}\n` +
@@ -132,7 +139,11 @@ function parseSteps(full, goal) {
       const obj = JSON.parse(candidate);
       if (Array.isArray(obj.steps) && obj.steps.length > 0) {
         const steps = obj.steps
-          .map(s => String(s).replace(/^(step\s*\d+\s*[:.\-]\s*)/i, '').trim())
+          .map(s => String(s)
+            .replace(/^(\d+[.)]\s*)/,    '')
+            .replace(/^(step\s*\d+\s*[:.)\-]\s*)/i, '')
+            .trim()
+          )
           .filter(s => s.length > 3);
         if (steps.length > 0) return {
           steps,
