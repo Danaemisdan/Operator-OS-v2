@@ -13,17 +13,38 @@ const http = require('http');
  * @returns {Promise<{ steps: string[], current: number }>}
  */
 async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
-  // Force the model into JSON-only mode with a strict few-shot example
   const prompt =
-    `You are a task planning agent. Break the user's goal into 2-5 clear, sequential steps.\n` +
-    `Output ONLY a raw JSON object. No explanation, no prose, no markdown. Start with { immediately.\n\n` +
-    `Example input: "Book a flight to Paris"\n` +
-    `Example output: {"steps":["Navigate to a flight booking site like Google Flights","Search for flights to Paris with the desired dates","Select the best flight option and proceed to checkout"]}\n\n` +
+    `You are a task planning agent. Break the user's goal into 2-5 clear, sequential browser steps.\n` +
+    `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
+    `RESEARCH SKILLS AVAILABLE (headless, no browser needed):\n` +
+    `- searchLeads: find people matching a role/industry/location\n` +
+    `- lookupCompany: get structured info about a company\n` +
+    `- lookupApp: get info about a software/app/service\n` +
+    `- searchNews: find recent news on a topic\n` +
+    `- extractPageData: extract structured data from a URL\n\n` +
+    `STRICT RESEARCH GATE — only set research_needed=true when ALL of these are true:\n` +
+    `  1. The goal needs to FIND or GATHER information before any browser action\n` +
+    `  2. The user did NOT specify a specific website to go to\n` +
+    `  3. The research result will directly change what browser steps are needed\n` +
+    `If the user says "search LinkedIn for X" → research_needed=false (go to LinkedIn directly)\n` +
+    `If the user says "find me AI startups" → research_needed=true (searchLeads first)\n` +
+    `If the user says "look up Notion" → research_needed=true (lookupApp first)\n` +
+    `If the user says "open YouTube" → research_needed=false (pure navigation)\n\n` +
+    `Example 1 — pure browser task:\n` +
+    `Goal: "Book a flight to Paris"\n` +
+    `Output: {"research_needed":false,"research_skill":null,"research_args":null,"steps":["Navigate to google.com/flights","Search flights to Paris","Select best option and checkout"]}\n\n` +
+    `Example 2 — research first:\n` +
+    `Goal: "Find me AI startup leads"\n` +
+    `Output: {"research_needed":true,"research_skill":"searchLeads","research_args":{"role":"founder","industry":"AI","limit":20},"steps":["Use research results to open relevant company pages","Extract contact info from each page"]}\n\n` +
+    `Example 3 — app lookup:\n` +
+    `Goal: "Tell me about Notion pricing"\n` +
+    `Output: {"research_needed":true,"research_skill":"lookupApp","research_args":{"name":"Notion"},"steps":["Navigate to notion.so/pricing if more detail needed"]}\n\n` +
     `Now plan this goal:\n` +
     `Goal: "${goal}"\n` +
     `Current page: ${currentUrl || 'New tab'}\n` +
     `Available skills: ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
-    `Output ONLY JSON: {"steps":[...]}`;
+    `Output ONLY JSON: {"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[...]}`;
+
 
   const body = JSON.stringify({
     model: 'operator-engine-3b',
@@ -113,7 +134,13 @@ function parseSteps(full, goal) {
         const steps = obj.steps
           .map(s => String(s).replace(/^(step\s*\d+\s*[:.\-]\s*)/i, '').trim())
           .filter(s => s.length > 3);
-        if (steps.length > 0) return { steps, current: 0 };
+        if (steps.length > 0) return {
+          steps,
+          current: 0,
+          research_needed:  obj.research_needed === true,
+          research_skill:   obj.research_skill   || null,
+          research_args:    obj.research_args    || null,
+        };
       }
     } catch (_) {}
   }
@@ -122,13 +149,13 @@ function parseSteps(full, goal) {
   const lines = full.split('\n');
   const numbered = lines
     .map(l => l.trim())
-    .filter(l => /^(\d+[\.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i.test(l))
-    .map(l => l.replace(/^(\d+[\.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i, '').trim())
+    .filter(l => /^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i.test(l))
+    .map(l => l.replace(/^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i, '').trim())
     .filter(l => l.length > 5);
-  if (numbered.length > 0) return { steps: numbered, current: 0 };
+  if (numbered.length > 0) return { steps: numbered, current: 0, research_needed: false, research_skill: null, research_args: null };
 
   // Final fallback: treat the whole goal as a single step
-  return { steps: [goal], current: 0 };
+  return { steps: [goal], current: 0, research_needed: false, research_skill: null, research_args: null };
 }
 
 /**

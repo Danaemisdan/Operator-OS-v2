@@ -587,8 +587,47 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
   const plan = await window.electronAPI.decomposeGoal(enrichedGoal, getActiveWebview().src);
   if (streamDiv) streamDiv = null;
 
+  // ── Research Gate: run research skill BEFORE browser steps if Planner flagged it ──
+  let researchContext = '';
+  if (plan.research_needed && plan.research_skill) {
+    const skillName = plan.research_skill;
+    const skillArgs = plan.research_args || {};
+    appendAiMessage(`🔬 **Research Agent** running \`${skillName}\` before browser steps...`);
+    try {
+      let researchResult = null;
+      if (skillName === 'searchLeads')    researchResult = await window.electronAPI.researchLeads(skillArgs);
+      else if (skillName === 'lookupCompany') researchResult = await window.electronAPI.researchCompany(skillArgs.name || String(skillArgs));
+      else if (skillName === 'lookupApp')     researchResult = await window.electronAPI.researchApp(skillArgs.name || String(skillArgs));
+      else if (skillName === 'searchNews')    researchResult = await window.electronAPI.researchNews(skillArgs.topic || enrichedGoal, skillArgs.days, skillArgs.limit);
+      else if (skillName === 'extractPageData') researchResult = await window.electronAPI.researchExtract(skillArgs.url, skillArgs.schema);
+
+      if (researchResult) {
+        const resultStr = JSON.stringify(researchResult, null, 2);
+        researchContext = `\n\n[RESEARCH RESULTS from ${skillName}]:\n${resultStr.slice(0, 3000)}`;
+        const preview = Array.isArray(researchResult)
+          ? `Found **${researchResult.length}** results`
+          : `Got structured data: ${Object.keys(researchResult).join(', ')}`;
+        appendAiMessage(`✅ Research complete — ${preview}\n\`\`\`json\n${resultStr.slice(0, 600)}${resultStr.length > 600 ? '\n...' : ''}\n\`\`\``);
+      }
+    } catch (e) {
+      appendAiMessage(`⚠️ Research skill failed (${e.message}) — continuing with browser only`);
+    }
+  }
+
+  // Inject research results into the goal context for the executor
+  const executorGoal = researchContext ? enrichedGoal + researchContext : enrichedGoal;
+
+  // Show Research Agent spinner in TPP
+  if (plan.research_needed && plan.research_skill) {
+    tpp.setResearch(true, `Research Agent — ${plan.research_skill}`);
+  }
+
   const planHtml = plan.steps.map((s, i) => `<li>${i + 1}. ${s}</li>`).join('');
   appendAiMessage(`📋 **Plan:**<ol style="margin:8px 0 0 16px;padding:0">${planHtml}</ol>`);
+
+  // ── Show the Task Progress Panel ────────────────────────────────────────
+  tpp.show(rawGoal, plan.steps);
+  tpp.setResearch(false);
 
   let isComplete = false;
   let previousActions = [];
@@ -596,9 +635,12 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
   const MAX_ACTIONS_PER_STEP = 12;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
+
   while (!isComplete && currentStepIdx < plan.steps.length) {
     const currentStep = plan.steps[currentStepIdx];
+    tpp.setStep(currentStepIdx);
     let actionCount = 0;
+
 
     while (!isComplete && actionCount < MAX_ACTIONS_PER_STEP) {
       actionCount++;
@@ -612,6 +654,11 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
+
+        // Update thought in TPP while LLM decides next action
+        tpp.setThought(`Deciding: ${currentStep.substring(0, 80)}`);
+        tpp.incrementAction(currentStepIdx);
+
 
         // Tell the agent EXACTLY what's on screen + the full original goal for context
         const contextualStep = `ORIGINAL GOAL: ${enrichedGoal}
@@ -641,6 +688,7 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
         if (agentResponse.status === 'complete') {
           // ── OBSERVER VERIFICATION: use real DOM signals, not just LLM guess ──
           await refreshActiveGraph(wv);
+          tpp.setThought(`Verifying: ${plan.steps[currentStepIdx].substring(0, 70)}`);
           appendAiMessage(`🕵️ Verifying: **${plan.steps[currentStepIdx]}**...`);
 
           const obs = await window.electronAPI.observePage({
@@ -654,6 +702,7 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
           if (obs.blockers && obs.blockers.length > 0) {
             const blockerMsg = obs.blockers.join(', ');
             appendAiMessage(`⚠️ Blocker detected: **${blockerMsg}**. Resolving before continuing...`);
+            tpp.setObserver('BLOCKED', obs.next_hint, true);
             previousActions.push(`BLOCKER: ${blockerMsg}. You MUST resolve this first. ${obs.next_hint}`);
             continue;
           }
@@ -666,12 +715,16 @@ CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}
 
           // Step done
           await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'complete', outcome: 'success', detail: obs.what_changed });
+          tpp.stepDone(currentStepIdx);
+          tpp.setObserver(obs.state, obs.next_hint, false);
           currentStepIdx++;
           if (currentStepIdx >= plan.steps.length) {
             appendAiMessage(`✅ **All ${plan.steps.length} steps done!** — ${obs.what_changed}`);
             isComplete = true;
+            tpp.complete();
           } else {
             appendAiMessage(`✅ Step done (${obs.what_changed}) → **${plan.steps[currentStepIdx]}**`);
+            tpp.setStep(currentStepIdx);
             previousActions = [`Observer summary of last step: ${obs.what_changed}`];
           }
           continue;
@@ -1298,3 +1351,126 @@ window.addEventListener('mouseup', () => {
     });
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TASK PROGRESS PANEL (TPP) CONTROLLER
+// Controls the live task progress UI at the bottom of the left panel.
+// Called from the executor loop to show real-time state.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const tpp = (() => {
+  const panel       = document.getElementById('task-progress-panel');
+  const goalLabel   = document.getElementById('tpp-goal-label');
+  const stepsEl     = document.getElementById('tpp-steps');
+  const thoughtEl   = document.getElementById('tpp-thought');
+  const thoughtText = document.getElementById('tpp-thought-text');
+  const observerEl  = document.getElementById('tpp-observer');
+  const obsState    = document.getElementById('tpp-observer-state');
+  const obsHint     = document.getElementById('tpp-observer-hint');
+  const researchEl  = document.getElementById('tpp-research');
+  const researchLbl = document.getElementById('tpp-research-label');
+  const closeBtn    = document.getElementById('tpp-close');
+
+  let _steps = [];
+  let _currentIdx = 0;
+  let _actionCounts = [];
+
+  closeBtn.addEventListener('click', () => hide());
+
+  function show(goal, steps) {
+    _steps = steps;
+    _currentIdx = 0;
+    _actionCounts = steps.map(() => 0);
+    goalLabel.textContent = goal.length > 45 ? goal.substring(0, 42) + '...' : goal;
+    _renderSteps();
+    panel.classList.remove('hidden');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  function hide() {
+    panel.classList.add('hidden');
+    thoughtEl.classList.add('hidden');
+    observerEl.classList.add('hidden');
+    researchEl.classList.add('hidden');
+  }
+
+  function _stepIcon(status) {
+    if (status === 'pending')  return '○';
+    if (status === 'running')  return '⬡';
+    if (status === 'done')     return '✓';
+    if (status === 'error')    return '✕';
+    if (status === 'skipped')  return '—';
+    return '○';
+  }
+
+  function _renderSteps() {
+    stepsEl.innerHTML = '';
+    _steps.forEach((step, i) => {
+      const status = i < _currentIdx ? 'done' : i === _currentIdx ? 'running' : 'pending';
+      const div = document.createElement('div');
+      div.className = `tpp-step ${status}`;
+      div.id = `tpp-step-${i}`;
+      div.innerHTML = `
+        <div class="tpp-step-icon">${_stepIcon(status)}</div>
+        <div class="tpp-step-text">${step}</div>
+        <div class="tpp-step-count" id="tpp-count-${i}">${status === 'running' && _actionCounts[i] > 0 ? _actionCounts[i] + ' acts' : ''}</div>
+      `;
+      stepsEl.appendChild(div);
+    });
+  }
+
+  function setStep(idx) {
+    _currentIdx = idx;
+    _renderSteps();
+  }
+
+  function stepDone(idx) {
+    const el = document.getElementById(`tpp-step-${idx}`);
+    if (el) { el.className = 'tpp-step done'; el.querySelector('.tpp-step-icon').textContent = '✓'; }
+  }
+
+  function stepError(idx) {
+    const el = document.getElementById(`tpp-step-${idx}`);
+    if (el) { el.className = 'tpp-step error'; el.querySelector('.tpp-step-icon').textContent = '✕'; }
+  }
+
+  function incrementAction(idx) {
+    _actionCounts[idx] = (_actionCounts[idx] || 0) + 1;
+    const countEl = document.getElementById(`tpp-count-${idx}`);
+    if (countEl) countEl.textContent = _actionCounts[idx] + ' acts';
+  }
+
+  function setThought(text) {
+    if (!text) { thoughtEl.classList.add('hidden'); return; }
+    thoughtText.textContent = text.length > 120 ? text.substring(0, 117) + '...' : text;
+    thoughtEl.classList.remove('hidden');
+  }
+
+  function setObserver(state, hint, isBlocker = false) {
+    if (!state) { observerEl.classList.add('hidden'); return; }
+    obsState.textContent = state.replace(/_/g, ' ').toUpperCase();
+    obsState.className = 'tpp-state-pill' + (isBlocker ? ' blocker' : '');
+    obsHint.textContent = hint || '';
+    observerEl.classList.remove('hidden');
+  }
+
+  function setResearch(running, label) {
+    if (!running) { researchEl.classList.add('hidden'); return; }
+    researchLbl.textContent = label || 'Research Agent running...';
+    researchEl.classList.remove('hidden');
+  }
+
+  function complete() {
+    // Mark all remaining steps as done and auto-hide after delay
+    _steps.forEach((_, i) => stepDone(i));
+    setThought(null);
+    setObserver(null);
+    setResearch(false);
+    setTimeout(() => hide(), 3000);
+  }
+
+  return { show, hide, setStep, stepDone, stepError, incrementAction, setThought, setObserver, setResearch, complete };
+})();
+
+// Expose tpp globally so handleTaskExecution (defined inside handleChatSubmit) can use it
+window.tpp = tpp;
