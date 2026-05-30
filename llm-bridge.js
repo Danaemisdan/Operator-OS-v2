@@ -131,11 +131,12 @@ async function chatAgentWithLLM(promptText, graph, previousActions = [], sender,
 ${interactiveEls.slice(0, 15).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}`;
   }
 
+  // Chat system prompt: minimal by default, expanded only when page context is attached
+  const hasChatPageContext = !!pageContext;
   const systemPrompt = isChatMode
-    ? `You are Operator, an AI agent that controls a real browser and can do things on the web for the user.
-You have full browser access — you can open websites, search, click, type, fill forms, and automate tasks.
-When the user asks what you see or which page you are on, answer ONLY from the page context provided below — never guess or make up page content from your training data.
-Be concise. No disclaimers.${pageContext}`
+    ? (hasChatPageContext
+        ? `You are Operator, a browser AI. Answer ONLY from the page context below — never guess or hallucinate page content.\nBe concise.${pageContext}`
+        : `You are Operator, a browser AI assistant. Be concise and conversational.`)
     : `You are the Operator Executor Agent controlling a real browser.${pageContext}
 ${memory ? `\nPast memory:\n${memory}` : ''}
 Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-8).join(' | ')}
@@ -156,7 +157,7 @@ Respond with ONLY this JSON:
   const messages = isChatMode
     ? [
         { role: 'system', content: systemPrompt },
-        ...conversationHistory.slice(-16), // last 8 turns (16 messages)
+        ...conversationHistory.slice(-12), // last 6 turns — smaller context = faster inference
         { role: 'user', content: promptText },
       ]
     : [

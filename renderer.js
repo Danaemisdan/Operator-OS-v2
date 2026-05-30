@@ -387,16 +387,35 @@ async function handleChatSubmit() {
 
 
   if (intent === 'chat') {
-    // Refresh DOM so the model knows the actual current page state
-    try {
-      const wv = getActiveWebview();
-      if (wv) await refreshActiveGraph(wv);
-    } catch (_) {}
+    // ── Selective knowledge graph injection ──────────────────────────────────
+    // The activeGraph is maintained by the background DOM monitor — no re-fetch needed.
+    // Only inject what the query actually needs:
+    //   • Pure conversational ("hey", "thanks") → no context, max speed
+    //   • Page-awareness query ("what page", "where am I") → url + title only
+    //   • Element-level query ("what buttons", "what can I click") → + top elements
+    const q = goalText.toLowerCase();
+    const PAGE_KEYWORDS    = ['page', 'site', 'url', 'where', 'current', 'here', 'open', 'showing', 'which'];
+    const ELEMENT_KEYWORDS = ['button', 'link', 'element', 'click', 'see', 'screen', 'show', 'what', 'list'];
+
+    const wantsPage    = PAGE_KEYWORDS.some(k => q.includes(k));
+    const wantsElements = ELEMENT_KEYWORDS.some(k => q.includes(k));
+
+    let chatGraph = { url: '', title: '', elements: [] }; // default: no context
+    if (activeGraph) {
+      if (wantsPage && wantsElements) {
+        // Full element context — use cached graph, no re-fetch
+        chatGraph = activeGraph;
+      } else if (wantsPage) {
+        // Just location — tiny context, instant
+        chatGraph = { url: activeGraph.url, title: activeGraph.title, elements: [], semanticPattern: activeGraph.semanticPattern };
+      }
+      // else: pure conversational → empty graph → model gets no page noise
+    }
 
     streamDiv = null;
     const chatResponse = await window.electronAPI.agentChat(
       goalText,
-      activeGraph || { url: '', title: '', elements: [] },  // live page context
+      chatGraph,
       [], '',
       conversationHistory
     );
@@ -405,7 +424,6 @@ async function handleChatSubmit() {
     const replyText = (streamDiv?.textContent || chatResponse?.args?.text || '').trim();
     streamDiv = null;
 
-    // Intent classifier said 'chat' — trust it. Show the reply and move on.
     if (!alreadyStreamed && replyText) appendAiMessage(replyText);
     pushToHistory(goalText, replyText);
     return;
