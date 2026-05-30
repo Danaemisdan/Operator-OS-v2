@@ -12,7 +12,7 @@ const { executeSkill } = require('./skills/executor.js');
 const { decomposeGoal } = require('./manager-agent.js');
 const { pruneGraph } = require('./dom-pruner.js');
 const { recordEpisode, recallRelevant } = require('./memory.js');
-const { researchHeadless } = require('./research-agent.js');
+const { researchHeadless, searchLeads, lookupCompany, lookupApp, searchNews, extractPageData } = require('./research-agent.js');
 const { observePageState, recoverMissingElement } = require('./observer.js');
 const { explorePage, buildBehaviorRecord } = require('./exploration-agent.js');
 const kg = require('./knowledge-graph.js');
@@ -226,6 +226,33 @@ ipcMain.handle('start-research', async (event, query) => {
   });
   return fullReport;
 });
+
+// --- Research Skills (headless, structured output) ---
+ipcMain.handle('research-leads', async (_, criteria) => {
+  try { return await searchLeads(criteria); }
+  catch (e) { console.error('[research-leads]', e.message); return []; }
+});
+
+ipcMain.handle('research-company', async (_, { name }) => {
+  try { return await lookupCompany(name); }
+  catch (e) { console.error('[research-company]', e.message); return { name, error: e.message }; }
+});
+
+ipcMain.handle('research-app', async (_, { name }) => {
+  try { return await lookupApp(name); }
+  catch (e) { console.error('[research-app]', e.message); return { name, error: e.message }; }
+});
+
+ipcMain.handle('research-news', async (_, { topic, days, limit }) => {
+  try { return await searchNews(topic, days || 7, limit || 10); }
+  catch (e) { console.error('[research-news]', e.message); return []; }
+});
+
+ipcMain.handle('research-extract', async (_, { url, schema }) => {
+  try { return await extractPageData(url, schema); }
+  catch (e) { console.error('[research-extract]', e.message); return {}; }
+});
+
 
 // --- Observer AI ---
 ipcMain.handle('observe-page', async (event, { graph, lastAction, expectation, goalContext }) => {

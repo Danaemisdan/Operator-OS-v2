@@ -27,8 +27,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recallMemory: (goal, url) => ipcRenderer.invoke('recall-memory', { goal, url }),
   recordMemory: (ep)        => ipcRenderer.invoke('record-memory', ep),
 
-  // Research
+  // Research (streaming)
   startResearch: (q) => ipcRenderer.invoke('start-research', q),
+
+  // Research Skills (headless, structured output)
+  researchLeads:   (criteria) => ipcRenderer.invoke('research-leads', criteria),
+  researchCompany: (name)     => ipcRenderer.invoke('research-company', { name }),
+  researchApp:     (name)     => ipcRenderer.invoke('research-app', { name }),
+  researchNews:    (topic, days, limit) => ipcRenderer.invoke('research-news', { topic, days, limit }),
+  researchExtract: (url, schema) => ipcRenderer.invoke('research-extract', { url, schema }),
 
   // Legacy domain knowledge (UI scan)
   getKnowledge:  (d) => ipcRenderer.invoke('get-knowledge', d),
