@@ -22,16 +22,18 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `navigate directly to its URL as the first step. NEVER search Google or any search engine to find a site you already know.\n` +
     `Wrong: "Open Google" then "Search for Amazon" then "Navigate to Amazon"\n` +
     `Right: "Navigate to https://www.amazon.com"\n\n` +
-    `RESEARCH SKILLS AVAILABLE (headless, no browser needed):\n` +
-    `- searchLeads: find people matching a role/industry/location\n` +
-    `- lookupCompany: get structured info about a company\n` +
-    `- lookupApp: get info about a software/app/service\n` +
-    `- searchNews: find recent news on a topic\n` +
-    `- extractPageData: extract structured data from a URL\n\n` +
-    `STRICT RESEARCH GATE — only set research_needed=true when ALL of these are true:\n` +
-    `  1. The goal needs to FIND or GATHER information before any browser action\n` +
-    `  2. The user did NOT specify a specific website to go to\n` +
-    `  3. The research result will directly change what browser steps are needed\n\n` +
+    `RESEARCH SKILLS — use ONLY when the goal explicitly requires finding data before browser actions:\n` +
+    `- searchLeads: find PEOPLE by job title/industry (founders, engineers, executives). B2B only.\n` +
+    `- lookupCompany: get structured info about a specific named company\n` +
+    `- lookupApp: get info about a specific named software/app/service\n` +
+    `- searchNews: find recent news on a specific topic or company\n` +
+    `- extractPageData: extract structured data from a known URL\n\n` +
+    `RESEARCH GATE — set research_needed=true ONLY IF the goal is about finding specific people/companies/contacts to reach out to.\n` +
+    `DO NOT use research for:\n` +
+    `  - Product searches ("best phone", "water bottles", "cheap laptops") → just browse a shopping site\n` +
+    `  - Content browsing ("nice videos", "movies", "music") → just browse the site directly\n` +
+    `  - General info questions ("best way to X", "how to Y") → just use Google/the browser\n` +
+    `  - Any goal where a simple browser search would answer it\n\n` +
     `STEP RULES:\n` +
     `- Write steps as plain text with NO leading numbers or prefixes\n` +
     `- If already on the right page, skip navigation steps\n` +

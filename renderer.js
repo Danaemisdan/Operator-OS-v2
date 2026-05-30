@@ -609,7 +609,7 @@ Return ONLY a JSON array of strings (max 2 items), nothing else: ["question1"] o
   // Inject research results into the goal context for the executor
   const executorGoal = researchContext ? enrichedGoal + researchContext : enrichedGoal;
 
-  const planHtml = plan.steps.map((s, i) => `<li>${i + 1}. ${s}</li>`).join('');
+  const planHtml = plan.steps.map(s => `<li>${s}</li>`).join('');
   appendAiMessage(`📋 **Plan:**<ol style="margin:8px 0 0 16px;padding:0">${planHtml}</ol>`);
 
   let isComplete = false;

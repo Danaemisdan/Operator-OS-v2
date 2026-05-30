@@ -23,6 +23,19 @@ function classifyElementPurpose(el) {
 
   const combined = [tL, ph, aria, id].join(' ');
 
+  // ── Submit-type inputs — MUST come before search_input check ───────────────
+  // <input type="submit"> and <button type="submit"> would otherwise be
+  // misclassified as search boxes because they share the word "search".
+  if (type === 'submit' || (type === 'button' && tag === 'input')) {
+    if (combined.includes('search') || combined.includes('find')) {
+      return { category: 'search_submit', purpose: 'Search submit button — click to run the search', confidence: 0.98 };
+    }
+    if (tL.includes('lucky') || tL.includes('lucky')) {
+      return { category: 'button', purpose: `Button: "${t}" — click to activate`, confidence: 0.90 };
+    }
+    return { category: 'submit', purpose: `Submit button: "${t}"`, confidence: 0.92 };
+  }
+
   // ── Auth ───────────────────────────────────────────────────────────────────
   if (['sign in','log in','login','signin'].some(k => tL === k || aria.startsWith(k)))
     return { category: 'auth_login',  purpose: 'Opens login form to sign in', confidence: 0.99 };
@@ -49,11 +62,15 @@ function classifyElementPurpose(el) {
   if (['×','✕','✖','close','dismiss','not now','maybe later','no thanks','skip for now','remind me later','cancel'].some(k => tL === k) || aria === 'close' || id.includes('modal-close') || id.includes('close-btn'))
     return { category: 'dismiss',      purpose: 'Closes popup, modal, or banner', confidence: 0.97 };
 
-  // ── Search ─────────────────────────────────────────────────────────────────
-  if ((tag === 'input' || tag === 'textarea') && (ph.includes('search') || ph.includes('find') || id.includes('search') || aria.includes('search')))
-    return { category: 'search_input', purpose: `Search input — type query here (placeholder: "${ph || 'search'}")`, confidence: 0.98 };
-  if (tL === 'search' && tag === 'button')
-    return { category: 'search_submit', purpose: 'Submits the search query', confidence: 0.97 };
+  // ── Search inputs (text fields only, never submit buttons) ────────────────
+  if ((tag === 'input' || tag === 'textarea') &&
+      type !== 'submit' && type !== 'button' && type !== 'reset' &&
+      (ph.includes('search') || ph.includes('find') || id.includes('search') || aria.includes('search')))
+    return { category: 'search_input', purpose: `Search input — type your query here (placeholder: "${ph || 'search'}")`, confidence: 0.98 };
+
+  // ── Search submit buttons (text buttons whose label contains "search") ──────
+  if ((tag === 'button' || tag === 'input') && (tL.includes('search') || tL.includes('find now') || aria.includes('search button')))
+    return { category: 'search_submit', purpose: 'Search submit button — click to run the search', confidence: 0.96 };
 
   // ── Apply / job CTAs ───────────────────────────────────────────────────────
   if (['easy apply','apply now','apply','1-click apply','quick apply','apply here'].some(k => tL === k))
