@@ -399,19 +399,27 @@ async function handleChatSubmit() {
     const replyText = (streamDiv?.textContent || chatResponse?.args?.text || '').trim();
     streamDiv = null;
 
-    const SITE_NAMES = [
-      'linkedin','google','gmail','amazon','twitter','instagram','facebook',
-      'youtube','notion','slack','discord','github','reddit','netflix',
-      'spotify','hubspot','salesforce','shopify','airbnb','booking','zoom','outlook',
-    ];
+    // Detect whether a named service/app is mentioned in the user's goal or the reply —
+    // without hardcoding any site list. A "named service word" is a word that:
+    //   - isn't a common English function word
+    //   - is short enough to be a brand/app name (3–20 chars, no spaces)
+    // Works for any site, including ones that didn't exist when this was written.
+    const _commonWords = new Set(['the','a','an','and','or','but','in','on','at','to','for','of',
+      'with','it','is','was','be','do','as','we','me','you','your','he','she','what','how',
+      'why','when','where','who','that','this','those','get','set','see','use','let','has',
+      'had','can','may','not','all','any','new','one','two','out','now','just','more','also',
+      'like','here','there','best','good','help','need','want','make','find','show','tell',
+      'know','go','up','down','back','look','some','from','than','then','they','him','her',
+      'its','our','us','am','are','will','would','could','should','i','my','please','hi',
+    ]);
     const TASK_SIGNALS = [
       'help you','assist you','find','search','navigate','go to','look for',
       'lead','leads','job','jobs','apply','send','message','book','order',
     ];
-    const replyLower  = replyText.toLowerCase();
+    const replyLower    = replyText.toLowerCase();
     const combinedLower = replyLower + ' ' + goalText.toLowerCase();
-
-    const siteInReplyOrInput = SITE_NAMES.some(s => combinedLower.includes(s));
+    const _allWords = combinedLower.replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w => w.length >= 3);
+    const siteInReplyOrInput = _allWords.some(w => !_commonWords.has(w) && /^[a-z][a-z0-9]{2,19}$/.test(w));
     const taskInReply        = TASK_SIGNALS.some(t => replyLower.includes(t));
 
     if (siteInReplyOrInput && taskInReply) {

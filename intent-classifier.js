@@ -26,14 +26,11 @@ const TASK_VERBS = new Set([
   'apply for', 'apply to', 'register for', 'sign up for',
 ]);
 
-// Task phrases that appear ANYWHERE in the message (not just start)
-const TASK_PHRASES = [
-  'send a message on', 'send a message to', 'message someone on',
-  'apply for a job', 'apply to jobs', 'find a job on',
-  'book a flight', 'book a hotel', 'order from',
-  'search on google', 'look up on',
-  'open a new tab', 'go to the', 'take me to',
-];
+// Task phrases are fully covered by TASK_VERBS above.
+// Any action verb followed by a destination, platform, or object = task.
+// No hardcoded phrase list needed — verb detection handles all cases.
+const TASK_PHRASES = [];
+
 
 // Prefixes that redirect to underlying intent ('can you open gmail' → task)
 const REDIRECT_PREFIXES = [
@@ -108,29 +105,33 @@ async function classifyIntent(message) {
     }
   }
 
-  // 6. Site-name escalation — if message mentions a known site/service AND
-  //    contains an action-flavoured word anywhere, treat as task even if truncated.
-  //    Catches "ind me sales leads on LinkedIn" (missing 'f'), etc.
-  const KNOWN_SITES = [
-    'linkedin', 'google', 'gmail', 'amazon', 'twitter', 'instagram', 'facebook',
-    'youtube', 'notion', 'slack', 'discord', 'github', 'reddit', 'netflix',
-    'spotify', 'hubspot', 'salesforce', 'shopify', 'airbnb', 'booking',
-    'uber', 'doordash', 'whatsapp', 'telegram', 'zoom', 'outlook',
-  ];
-  const ACTION_WORDS = [
-    'find', 'search', 'get', 'look', 'send', 'message', 'apply', 'leads',
-    'jobs', 'post', 'buy', 'order', 'book', 'check', 'open', 'go',
-    'show', 'download', 'upload', 'connect', 'follow', 'like', 'share',
-  ];
-  const hasSite   = KNOWN_SITES.some(s => lower.includes(s) || s.startsWith(lower.replace(/[^a-z]/g, '').substring(0, 5)));
-  const hasAction = ACTION_WORDS.some(a => lower.includes(a));
-  if (hasSite && hasAction) {
-    return { intent: 'task', confidence: 0.88 };
+  // 6. Named-service escalation — if a message contains an action word AND what
+  //    looks like a named service or app (a word that isn't a common English word),
+  //    treat it as a task. Works for any app/site, not just a hardcoded list.
+  //    e.g. "find me sales leads on LinkedIn" / "open Notion" / "check Slack"
+  const COMMON_WORDS = new Set([
+    'the','a','an','and','or','but','in','on','at','to','for','of','with',
+    'it','is','was','be','do','as','we','me','my','you','your','he','she',
+    'what','how','why','when','where','who','that','this','these','those',
+    'get','set','see','use','let','has','had','can','may','not','all','any',
+    'new','one','two','out','now','just','more','also','like','here','there',
+    'best','good','help','need','want','make','find','show','tell','know',
+    'go','do','up','down','back','look','some','from','than','then','they',
+    'him','her','its','our','us','am','are','will','would','could','should',
+  ]);
+  const words = lower.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 3);
+  // A "named service" word: not a common English word, looks like a brand name (short, no spaces)
+  const hasNamedService = words.some(w => !COMMON_WORDS.has(w) && /^[a-z][a-z0-9]{2,}$/.test(w) && words.length <= 8);
+  // Action detected using same TASK_VERBS set already defined above
+  const hasAction = [...TASK_VERBS].some(v => lower.includes(v));
+  if (hasNamedService && hasAction) {
+    return { intent: 'task', confidence: 0.85 };
   }
-  // Even just mentioning a site with no other words → probably a navigation intent
-  if (hasSite && lower.split(' ').length <= 4) {
-    return { intent: 'task', confidence: 0.82 };
+  // Short message that looks like a navigation intent (just a name + maybe "open/go")
+  if (hasNamedService && lower.split(/\s+/).length <= 4) {
+    return { intent: 'task', confidence: 0.80 };
   }
+
 
   // 7. Everything else is conversation
   return { intent: 'chat', confidence: 0.85 };

@@ -17,11 +17,10 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `You are a task planning agent. Break the user's goal into 2-4 clear, sequential browser steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
     `NAVIGATION PRINCIPLE:\n` +
-    `You are a language model. You already know the URL of every major website and service.\n` +
-    `If a user mentions ANY named service (Amazon, YouTube, LinkedIn, Gmail, Spotify, Netflix, Reddit, GitHub, etc.),\n` +
-    `navigate directly to its URL as the first step. NEVER search Google or any search engine to find a site you already know.\n` +
-    `Wrong: "Open Google" then "Search for Amazon" then "Navigate to Amazon"\n` +
-    `Right: "Navigate to https://www.amazon.com"\n\n` +
+    `You are a language model with knowledge of every public website and service.\n` +
+    `When the user names any website, app, or service, navigate directly to its URL — you already know it.\n` +
+    `Never route through a search engine to find a site. Never use Google as an intermediary for a URL you know.\n` +
+    `When no specific site is mentioned, use the most appropriate site for the task type.\n\n` +
     `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
     `- searchLeads: returns structured list of people matching a role/industry/location\n` +
     `- lookupCompany: returns structured data about a named company\n` +
