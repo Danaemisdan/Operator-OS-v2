@@ -102,7 +102,19 @@
       let priority = 0;
       
       if (isClickableTag || hasClickableRole) {
-        prefix = ['input', 'select', 'textarea'].includes(tag) ? 'INP' : (tag === 'a' || role === 'link' ? 'LNK' : 'BTN');
+        // <input type="submit|button|reset"> are BUTTONS — use BTN_ prefix
+        // Only true form inputs (text, search, email, password, number...) get INP_
+        const inputT = node.getAttribute('type') || '';
+        const isButtonInput = ['submit','button','reset','image'].includes(inputT.toLowerCase());
+        if (tag === 'a' || role === 'link') {
+          prefix = 'LNK';
+        } else if (isButtonInput || tag === 'button') {
+          prefix = 'BTN';
+        } else if (['input','select','textarea'].includes(tag)) {
+          prefix = 'INP';
+        } else {
+          prefix = 'BTN';
+        }
         priority = 4;
       } else if (hasClickAttr) {
         prefix = (isTextTag || hasDirectText) ? 'LNK' : 'BTN';
@@ -195,7 +207,9 @@
       
       const label = document.createElement('div');
       label.className = 'op-text-label';
-      label.innerText = `${id} ${node.tagName === 'IMG' ? '🖼️' : (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' ? '✍️' : '🖱️')}`;
+      const _emojiInputT = (node.getAttribute('type') || '').toLowerCase();
+      const _isTypeableInput = (node.tagName === 'INPUT' && !['submit','button','reset','image','checkbox','radio'].includes(_emojiInputT)) || node.tagName === 'TEXTAREA';
+      label.innerText = `${id} ${node.tagName === 'IMG' ? '🖼️' : (_isTypeableInput ? '✍️' : '🖱️')}`;
       label.style.position = 'absolute';
       label.style.background = '#3b82f6';
       label.style.color = 'white';
