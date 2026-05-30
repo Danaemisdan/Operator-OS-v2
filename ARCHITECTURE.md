@@ -638,9 +638,9 @@ None of this resets between sessions. All of it compounds. That's the moat.
 | Execution Engine | `main.js` (execute-action) | ✅ Done |
 | UI Mapper / Indexer | `indexer.js` | ✅ Done |
 | DOM Pruner | `dom-pruner.js` | ✅ Done |
-| Observer AI | `llm-bridge.js` (observer role) | 🔧 Partial — merged with planner |
-| Verification Layer | `renderer.js` | 🔧 Partial — LLM-based only |
-| Recovery Agent | — | ❌ Not built |
+| Observer AI | `observer.js` | ✅ Done — separate role, blocker detection, feeds planner |
+| Verification Layer | `renderer.js` | ✅ Done — Observer-based, real DOM signals |
+| Recovery Agent | `observer.js` | ✅ Done — finds alternative elements, self-heals |
 | Exploration Agent | — | ❌ Not built |
 | Research Agent | `research-agent.js` | 🔧 Partial |
 | Skill Registry | `skills/_registry.js` | ✅ Basic |
