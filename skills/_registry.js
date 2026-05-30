@@ -496,10 +496,22 @@ function matchSkill(goalText) {
   if (!goalText || typeof goalText !== 'string') return null;
 
   const lower = goalText.toLowerCase().trim();
+
+  // Detect "on [site]" / "in [site]" / "using [site]" patterns.
+  // If the user names a specific site, only allow skills for that site.
+  // This prevents "search for X on Amazon" from matching google_search.
+  const siteOverrideMatch = lower.match(/\b(?:on|in|using|via|at|from)\s+([a-z][a-z0-9]{2,20})\b/);
+  const siteOverride = siteOverrideMatch ? siteOverrideMatch[1] : null; // e.g. "amazon", "youtube"
+
   let bestSkill = null;
   let bestScore = 0;
 
   for (const skill of skills) {
+    // If user named a specific site that isn't this skill's domain, skip
+    if (siteOverride && !skill.id.startsWith(siteOverride) && !skill.id.includes(siteOverride)) {
+      continue;
+    }
+
     for (const trigger of skill.triggers) {
       const triggerLower = trigger.toLowerCase();
       if (lower.startsWith(triggerLower) || lower.includes(triggerLower)) {

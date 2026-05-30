@@ -16,11 +16,13 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
   const prompt =
     `You are a task planning agent. Break the user's goal into 2-4 clear, sequential browser steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
-    `NAVIGATION PRINCIPLE:\n` +
-    `You are a language model with knowledge of every public website and service.\n` +
-    `When the user names any website, app, or service, navigate directly to its URL — you already know it.\n` +
-    `Never route through a search engine to find a site. Never use Google as an intermediary for a URL you know.\n` +
-    `When no specific site is mentioned, use the most appropriate site for the task type.\n\n` +
+    `NAVIGATION RULES (follow strictly):\n` +
+    `1. When the user names a website/service, navigate to its HOMEPAGE only (e.g. https://amazon.com, https://youtube.com).\n` +
+    `   NEVER guess or construct deep URL paths like /tech/laptops/ or /search?q=... — you do not know what paths exist on any site.\n` +
+    `   Let the site's own search/navigation do the work once you arrive.\n` +
+    `2. When no specific site is named, navigate to a relevant search engine and search there.\n` +
+    `3. Step descriptions should be plain English actions: "navigate to X", "search for Y", "click the search result".\n` +
+    `   Never put raw URLs in step text — navigate steps just say the site name.\n\n` +
     `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
     `- searchLeads: returns structured list of people matching a role/industry/location\n` +
     `- lookupCompany: returns structured data about a named company\n` +
@@ -30,16 +32,11 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `RESEARCH GATE — ask: would the research output directly feed into the browser steps as input?\n` +
     `  YES → set research_needed=true and choose the right skill\n` +
     `  NO  → set research_needed=false and just plan browser steps\n\n` +
-    `Research makes sense when: the goal requires gathering a list of targets, contacts, or data points\n` +
-    `that the agent will then act on in the browser (open pages, extract info, fill forms).\n` +
-    `Research does NOT make sense when: the browser itself can find the answer just by navigating and searching.\n\n` +
-    `JSON output format (two variants):\n` +
+    `JSON output format:\n` +
     `No research: {"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n` +
     `With research: {"research_needed":true,"research_skill":"skillName","research_args":{...},"steps":[...]}\n\n` +
-    `Now plan this goal:\n` +
     `Goal: "${goal}"\n` +
-    `Current page: ${currentUrl || 'New tab'}\n` +
-    `Available skills: ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
+    `Current page: ${currentUrl || 'New tab'}\n\n` +
     `Output ONLY JSON: {"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[...]}`;
 
 

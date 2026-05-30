@@ -115,18 +115,33 @@ async function chatAgentWithLLM(promptText, graph, previousActions = [], sender,
   // Build page context — always inject when we have a real graph (both chat AND executor)
   let pageContext = '';
   if (graph.url || (graph.elements && graph.elements.length > 0)) {
-    const interactiveEls = (graph.elements || []).filter(e =>
+    const els = graph.elements || [];
+
+    // Visible text content — what the user actually SEES on the page
+    const textContent = els
+      .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
+      .slice(0, 12)
+      .map(e => e.text.trim())
+      .join(' | ');
+
+    // Link labels visible on page (text of links, not their hrefs)
+    const linkLabels = els
+      .filter(e => e.id && e.id.startsWith('LNK') && e.text && e.text.length > 1 && e.text.length < 40)
+      .slice(0, 10)
+      .map(e => e.text.trim())
+      .join(', ');
+
+    // Interactive elements (for executor mode)
+    const interactiveEls = els.filter(e =>
       e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
     );
-    const textEls = (graph.elements || []).filter(e =>
-      e.id && e.id.startsWith('TXT') && e.text && e.text.length > 3 && e.text.length < 100
-    );
-    const visibleTexts = textEls.slice(0, 8).map(e => `"${e.text}"`).join(', ');
-    pageContext = `\n\nCurrent page the browser is showing right now:
+
+    pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
 - Page type: ${graph.semanticPattern || 'Unknown'}
-- Visible text on screen: ${visibleTexts || 'none'}
+- Visible page text: ${textContent || '(none captured)'}
+- Visible links/buttons: ${linkLabels || '(none)'}
 - Interactive elements (${interactiveEls.length} total):
 ${interactiveEls.slice(0, 15).map(e => `  [${e.id}] "${e.text || ''}" — ${e.predictedEffect || e.role || ''}`).join('\n')}`;
   }
@@ -142,11 +157,13 @@ ${memory ? `\nPast memory:\n${memory}` : ''}
 Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-8).join(' | ')}
 
 RULES:
-- Study the page elements carefully. INP_ = input field, BTN_ = button, LNK_ = navigation link.
+- Study the page elements carefully. INP_ = input field, BTN_ = button, LNK_ = navigation link, TXT_ = visible text.
+- Read TXT_ elements to understand what page you are actually on before deciding what to do.
+- If the page shows "not found", "404", "page doesn't exist", "uh-oh", or similar error text → the URL was wrong. Use navigate to go to the site's homepage instead. Do NOT try to dismiss any dialogs on error pages.
+- If a popup, modal, cookie banner, or overlay is blocking an otherwise correct page, dismiss it first.
 - If you are already on the correct site/page, do NOT navigate again — take the next action.
-- If a popup, modal, cookie banner, or overlay is blocking the page, dismiss it FIRST before doing anything else.
-- If you need critical missing info (a password, a CAPTCHA answer, a specific name the user didn't provide), use ask_user. Do NOT ask for things you can figure out from context.
-- Output status="complete" ONLY when you have verified the goal is actually achieved on screen.
+- If you need critical missing info the user didn't provide, use ask_user. Do NOT ask about things you can infer.
+- Output status="complete" ONLY when the goal is actually visible/verified on screen.
 - ONE tool per response. No extra text outside the JSON.
 
 Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args, submits focused form/search), scroll, reply(args.text=msg), ask_user(args.text=question), research(args.text=query)
