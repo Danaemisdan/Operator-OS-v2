@@ -22,10 +22,13 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
     `- Steps must be SPECIFIC to this exact goal — include the actual names, queries, targets from the goal.\n` +
     `- GOOD: "navigate to LinkedIn", "search for 'software engineer jobs in Bangalore'", "click the first job listing that matches the goal"\n` +
     `- BAD: "navigate to a job site", "search for jobs", "click a result" — too vague, the executor is lost\n` +
-    `- Navigate steps: name the site — "navigate to LinkedIn", "navigate to Amazon". Never raw URLs.\n` +
+    `- Navigate steps: always name the site — "navigate to LinkedIn", "navigate to Amazon". Never raw URLs.\n` +
     `- Search steps: include the exact search query derived from the goal.\n` +
-    `- Click steps: describe what to click based on expected content — "click the first result that mentions X"\n` +
-    `- If the goal involves reading/extracting info: add a final step "read and report the [price/name/result] to the user"\n\n` +
+    `- Click steps: describe what to click — "click the first furniture result", "click on the cheapest product listed"\n` +
+    `- Research/shopping tasks need INTERMEDIATE steps: search → click result → read content → report. Do NOT skip the click step.\n` +
+    `- GOOD shopping plan: ["search Google for 'affordable sofas'", "click the first relevant result or site", "find prices on the page", "report cheapest options to the user"]\n` +
+    `- BAD shopping plan: ["search Google for 'affordable sofas'", "read and report the price"] — skips navigation to product page!\n` +
+    `- Only add a 'report to the user' step AFTER steps that will actually load the relevant data onto the page.\n\n` +
 
     `CLARIFYING QUESTIONS — ask ONLY when the answer structurally changes the plan:\n` +
     `- What to search for is unknown → ask\n` +
@@ -83,7 +86,7 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
         },
-        timeout: 30000,
+        timeout: 45000,
       },
       (res) => {
         let buffer = '';

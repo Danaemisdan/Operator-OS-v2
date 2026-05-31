@@ -86,7 +86,7 @@ Answer ONLY with this JSON:
       hostname: '127.0.0.1', port: 8080,
       path: '/v1/chat/completions', method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      timeout: 15000,
+      timeout: 45000,
     }, (res) => {
       res.on('data', chunk => {
         buffer += chunk.toString();

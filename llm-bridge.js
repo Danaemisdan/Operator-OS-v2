@@ -205,10 +205,12 @@ RULES:
 - If the page shows "not found", "404", "page doesn't exist" → navigate to the site homepage instead.
 - If you are already on the correct site/page, do NOT navigate again — take the next action.
 - If a popup/modal/cookie banner is blocking, dismiss it first.
-- NEVER use the reply tool during execution. reply is only when the task is fully complete.
+- NEVER use the reply tool during execution. reply is only when the task is fully complete AND the answer/result is visible on screen.
+- NEVER output reply with text "No action." — this is always wrong. If you don't know what action to take: scroll down to see more content, or use ask_user.
+- If the current page shows SEARCH RESULTS and your goal requires reading prices/details: you MUST click a result first to navigate to the actual product/content page. Do NOT reply from search results.
 - If you already typed into a field, do NOT type again — press_enter or click submit.
 - If you already pressed enter, do NOT press enter again — read the new page first.
-- status="complete" ONLY when the goal result is actually visible on screen.
+- status="complete" ONLY when the goal result is actually visible on screen AND you used reply to report it.
 - ONE tool per response. No extra text outside the JSON.
 
 Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args), scroll(args.text=up|down), reply(args.text=result_summary), ask_user(args.text=question)
