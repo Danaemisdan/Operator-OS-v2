@@ -241,6 +241,13 @@ ipcMain.handle('record-memory', async (event, episode) => {
   return true;
 });
 
+// ── User Variables (credentials, preferences) ─────────────────────────────
+ipcMain.handle('set-variable',       async (_, { key, value }) => { memory.setVariable(key, value); return true; });
+ipcMain.handle('get-variable',       async (_, key)           => memory.getVariable(key));
+ipcMain.handle('list-variable-keys', async ()                  => memory.listVariableKeys());
+ipcMain.handle('get-all-variables',  async ()                  => memory.getAllVariables());
+ipcMain.handle('clear-variable',     async (_, key)           => { memory.clearVariable(key); return true; });
+
 // --- Headless Research Subagent ---
 ipcMain.handle('start-research', async (event, query) => {
   let fullReport = '';

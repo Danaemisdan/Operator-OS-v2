@@ -10,6 +10,7 @@ const os = require('os');
 
 const MEMORY_DIR = path.join(os.homedir(), 'Operator Downloads');
 const MEMORY_PATH = path.join(MEMORY_DIR, 'episodic_memory.json');
+const VARS_PATH   = path.join(MEMORY_DIR, 'user_variables.json');
 
 // ---------------------------------------------------------------------------
 // Low-level helpers
@@ -177,6 +178,43 @@ module.exports = {
   recallRelevant,
   getAllEpisodes,
   clearMemory,
-  // Expose path so callers can display where memory lives
   MEMORY_PATH,
+
+  // ── User Variables Store ─────────────────────────────────────────────────
+  // Separate from episodic memory. Keys listed in context, values never in prompts.
+
+  setVariable(key, value) {
+    try {
+      if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
+      let vars = {};
+      try { vars = JSON.parse(fs.readFileSync(VARS_PATH, 'utf8')); } catch (_) {}
+      vars[key.toLowerCase().trim()] = value;
+      fs.writeFileSync(VARS_PATH, JSON.stringify(vars, null, 2), 'utf8');
+    } catch (e) { console.error('[memory] setVariable:', e.message); }
+  },
+
+  getVariable(key) {
+    try {
+      const vars = JSON.parse(fs.readFileSync(VARS_PATH, 'utf8'));
+      return vars[key.toLowerCase().trim()] ?? null;
+    } catch (_) { return null; }
+  },
+
+  listVariableKeys() {
+    try {
+      return Object.keys(JSON.parse(fs.readFileSync(VARS_PATH, 'utf8')));
+    } catch (_) { return []; }
+  },
+
+  getAllVariables() {
+    try { return JSON.parse(fs.readFileSync(VARS_PATH, 'utf8')); } catch (_) { return {}; }
+  },
+
+  clearVariable(key) {
+    try {
+      const vars = JSON.parse(fs.readFileSync(VARS_PATH, 'utf8'));
+      delete vars[key.toLowerCase().trim()];
+      fs.writeFileSync(VARS_PATH, JSON.stringify(vars, null, 2), 'utf8');
+    } catch (_) {}
+  },
 };

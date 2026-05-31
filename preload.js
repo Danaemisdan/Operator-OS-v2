@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recallMemory: (goal, url) => ipcRenderer.invoke('recall-memory', { goal, url }),
   recordMemory: (ep)        => ipcRenderer.invoke('record-memory', ep),
 
+  // User variables (credentials, preferences — persisted across sessions)
+  setVariable:      (key, value) => ipcRenderer.invoke('set-variable', { key, value }),
+  getVariable:      (key)        => ipcRenderer.invoke('get-variable', key),
+  listVariableKeys: ()           => ipcRenderer.invoke('list-variable-keys'),
+  getAllVariables:   ()           => ipcRenderer.invoke('get-all-variables'),
+  clearVariable:    (key)        => ipcRenderer.invoke('clear-variable', key),
+
   // Research (streaming)
   startResearch: (q) => ipcRenderer.invoke('start-research', q),
 
