@@ -1014,7 +1014,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
           }
         } else if (action === 'scroll') {
           msg += `<br>↕️ Scroll`;
-          await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'scroll', payload: { deltaX: 0, deltaY: 300, x: 500, y: 500 } });
+          await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'scroll', payload: { deltaY: window.innerHeight * 0.7 } });
           await delay(700); // give page time to settle before re-reading DOM
           await refreshActiveGraph(wv);
           previousActions.push(`Scrolled page. New elements may be visible.`);
@@ -1055,11 +1055,17 @@ Return ONLY a JSON array of question strings, nothing else.`;
                 payload: { x, y }
               });
               await delay(200);
-              // Step 2: Select all existing text (Ctrl+A) to clear it before typing
+              // Step 2: Select all existing text (Cmd+A on Mac) and delete to clear it
               await window.electronAPI.executeAction({
                 webContentsId: wv.getWebContentsId(),
                 action: 'keyboard_shortcut',
-                payload: { modifiers: ['ctrl'], keyCode: 'A' }
+                payload: { modifiers: ['meta'], keyCode: 'a' }
+              });
+              await delay(100);
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'keyboard_shortcut',
+                payload: { modifiers: [], keyCode: 'Backspace' }
               });
               await delay(100);
               // Step 3: Type the new text

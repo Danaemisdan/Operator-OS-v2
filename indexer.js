@@ -35,7 +35,6 @@
     let visibleRect = { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
     let parent = node;
     while (parent && parent !== document.body && parent !== document.documentElement) {
-       if (parent.getAttribute && parent.getAttribute('aria-hidden') === 'true') return false;
        const parentStyle = window.getComputedStyle(parent);
        if (parseFloat(parentStyle.opacity) < 0.1 || parentStyle.display === 'none') return false;
        

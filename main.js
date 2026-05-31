@@ -392,8 +392,13 @@ ipcMain.handle('execute-action', async (event, actionParams) => {
   }
 
   if (action === 'scroll') {
-    const { deltaX = 0, deltaY = 0, x = 0, y = 0 } = payload;
-    safeEvent({ type: 'mouseWheel', x, y, deltaX, deltaY, canScroll: true });
+    const { deltaY = 500 } = payload;
+    wc.executeJavaScript(`
+      try {
+        const scroller = document.scrollingElement || document.body;
+        scroller.scrollBy({ top: ${deltaY}, behavior: "smooth" });
+      } catch (e) {}
+    `);
     return true;
   }
 
