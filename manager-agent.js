@@ -14,47 +14,40 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
     : `Current page: ${currentUrl || 'New tab (no page loaded)'}`;
 
   const prompt =
-    `You are a smart browser task planning agent. Your job is to break the user's goal into 2-5 specific, richly-described sequential steps.\n` +
-    `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
+    `You are a browser task planning agent. Break the goal into 2-5 specific sequential steps.\n` +
+    `Output ONLY a raw JSON object. No prose, no markdown. Start with { immediately.\n\n` +
 
-    `STEP QUALITY RULES — most important:\n` +
-    `- Match detail level to the task. Simple tasks: 2-3 high-level steps. Complex tasks: can include specific click/type/navigate steps where each step is a real decision point.\n` +
-    `- NEVER split a single logical action into multiple micro-steps. \"click Cheapest filter\" is one step — not \"scroll to filter\", \"locate Cheapest\", \"click it\".\n` +
-    `- Steps must be SPECIFIC to this goal — include the actual site names, queries, filter names, values from the goal.\n` +
-    `- Search steps: include the exact query. Navigate steps: name the site. Report steps: say what to report.\n` +
-    `- Group related sub-actions: \"search Google Flights for cheapest one-way NYC→LA and apply Cheapest filter\" is one step, not five.\n` +
-    `- A good flight plan: [\"search Google for 'cheapest flights'\", \"navigate to Google Flights or Skyscanner\", \"search for cheapest one-way options and apply price filter\", \"report the best deals found\"]\n` +
-    `- A bad flight plan: 20 steps for click 'One way' tab, click 'Departure city', type 'New York', click 'Search'... — these are UI details the executor handles.\n\n` +
+    `STEP RULES:\n` +
+    `- Every "find/search/show/look up" task MUST have at least 2 steps: (1) navigate+search, (2) report what you found.\n` +
+    `- Steps must include actual site names, exact queries, and filter values from the goal.\n` +
+    `- Group related sub-actions. "search Google for X and click first result" is ONE step.\n` +
+    `- Never split: "click Submit" is not a step — the executor handles UI details.\n` +
+    `- Good plan for "find cheap water bottles": ["search Google Shopping for cheap water bottles under 500", "report the top 3 results with names and prices"]\n` +
+    `- Good plan for "book flight NYC to LA": ["search Google Flights for cheapest one-way NYC to LA next week", "report the cheapest options found"]\n\n` +
 
-    `CLARIFYING QUESTIONS — ask ONLY when the answer structurally changes the plan:\n` +
-    `- What to search for is unknown → ask\n` +
-    `- Which platform to use is ambiguous → ask  \n` +
-    `- A specific name/date/location is needed → ask\n` +
-    `Examples REQUIRING questions:\n` +
-    `  "find me a job" → ask: what role? what location? remote or on-site?\n` +
-    `  "follow people on instagram" → ask: follow people from where? any search criteria?\n` +
-    `  "book a flight" → ask: from? to? when? how many passengers?\n` +
-    `  "buy something for my mom" → ask: what kind of thing? what budget?\n` +
-    `Examples NOT requiring questions:\n` +
-    `  "search youtube for lofi music" → fully specified\n` +
-    `  "open amazon" → obvious destination\n` +
-    `  "search Amazon for Sony WH-1000XM5 and tell me the price" → fully specified\n` +
-    `Max 2 questions. Return questions:[] if goal is fully specified.\n\n` +
+    `CLARIFYING QUESTIONS — ask when the goal is a CATEGORY, not a specific thing:\n` +
+    `ASK when you see these patterns:\n` +
+    `  "find me a job" → job role? location? remote or on-site?\n` +
+    `  "find me some X" where X is a category (furniture, shoes, phone) → what type? budget?\n` +
+    `  "book a flight / hotel / restaurant" → where from? where to? when? how many?\n` +
+    `  "buy something / buy me a gift" → what category? budget?\n` +
+    `  "follow people on instagram" → who? what criteria?\n` +
+    `  "send a message" → to whom? what to say?\n` +
+    `  "post something" → on which platform? what content?\n` +
+    `  "order food" → from where? what do you want?\n` +
+    `  "search for good ones" → good what? category? price range?\n` +
+    `DO NOT ask when the goal is already specific:\n` +
+    `  "search YouTube for lofi music" → specific enough\n` +
+    `  "open amazon.com" → specific enough\n` +
+    `  "find cheap iPhone 15 Pro on Amazon" → specific enough\n` +
+    `  "search Google for water bottles under 500" → specific enough\n` +
+    `Max 2 questions. questions:[] only if FULLY specified with a clear search target.\n\n` +
 
-    `AVAILABLE SKILLS (execution pipeline shortcuts — use them in steps when relevant):\n` +
-    `${availableSkills.length > 0 ? availableSkills.map(s => `- ${s}`).join('\n') : '- (none)'}\n` +
-    `Skills run inside the executor pipeline — they don't replace planning. Just mention the goal in the step.\n\n` +
-
-    `RESEARCH TOOLS (headless, run before browser opens):\n` +
-    `- searchLeads: structured list of people by role/industry/location\n` +
-    `- lookupCompany: structured data about a company\n` +
-    `- lookupApp: structured data about a software/app\n` +
-    `- searchNews: recent news on a topic\n` +
-    `- extractPageData: extract structured data from a URL\n` +
-    `Set research_needed=true ONLY if research output directly feeds into browser steps.\n\n` +
+    `AVAILABLE SKILLS:\n` +
+    `${availableSkills.length > 0 ? availableSkills.map(s => `- ${s}`).join('\n') : '- (none)'}\n\n` +
 
     `Output format:\n` +
-    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["specific step 1","specific step 2"]}\n\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["step 1","step 2"]}\n\n` +
 
     `${pageInfo}\n` +
     `Goal: "${goal}"\n\n` +
@@ -164,14 +157,54 @@ function parseSteps(full, goal) {
         // Filter garbage steps — tool-name + status strings from confused model output
         const GARBAGE_STEP = /^(navigate|type|click|scroll|press_enter|reply|ask_user)\s+(running|complete|done|failed|error|pending)$/i;
         const cleanSteps = steps.filter(s => !GARBAGE_STEP.test(s.trim()));
-        if (cleanSteps.length > 0) return {
-          steps: cleanSteps,
-          questions: Array.isArray(obj.questions) ? obj.questions.filter(q => typeof q === 'string' && q.length > 3) : [],
-          current: 0,
-          research_needed:  obj.research_needed === true,
-          research_skill:   obj.research_skill   || null,
-          research_args:    obj.research_args    || null,
-        };
+        if (cleanSteps.length > 0) {
+          const planQuestions = Array.isArray(obj.questions)
+            ? obj.questions.filter(q => typeof q === 'string' && q.length > 3)
+            : [];
+
+          // ── Deterministic question injection ──────────────────────────────
+          // If LLM returned no questions but the goal is clearly underspecified,
+          // inject questions ourselves. Do NOT rely solely on the 3B model.
+          const goalL = goal.toLowerCase();
+          const detectedQs = [];
+          if (planQuestions.length === 0) {
+            if (/\bbook\s+(a|me|the)?\s*(flight|ticket|seat)\b/i.test(goal) && !/\bfrom\b.+\bto\b/i.test(goal))
+              detectedQs.push('Where are you flying from and to, and on what date?');
+            if (/\bbook\s+(a|me|the)?\s*(hotel|room|stay)\b/i.test(goal) && !/\b(city|in|at)\b/i.test(goal))
+              detectedQs.push('Which city and what dates?');
+            if (/\bfind\s+me\s+(a\s+)?job\b/i.test(goal))
+              detectedQs.push('What job role and location are you looking for? Remote or on-site?');
+            if (/\b(buy|order|get)\s+(me\s+)?(a\s+)?gift\b/i.test(goal))
+              detectedQs.push('What kind of gift and what\'s your budget?');
+            if (/\bpost\s+(a|something|an?\s+update)\b/i.test(goal) && !/\binstagram|twitter|facebook|linkedin|reddit\b/i.test(goal))
+              detectedQs.push('Which platform do you want to post on, and what should I post?');
+            if (/\bsend\s+(a\s+)?message\b/i.test(goal) && !/\bto\s+\w+/i.test(goal))
+              detectedQs.push('Who should I send the message to, and what should it say?');
+            if (/\bfollow\s+people\b/i.test(goal))
+              detectedQs.push('Who should I follow — any specific criteria or search terms?');
+            if (/\bfind\s+me\s+(some|a|good|cheap|best)\b/i.test(goal) && /\bgood\s+ones?\b/i.test(goal))
+              detectedQs.push('What type of item are you looking for, and do you have a budget in mind?');
+          }
+          const allQuestions = [...planQuestions, ...detectedQs].slice(0, 2);
+
+          // ── Enforce minimum 2 steps for find/search/show tasks ─────────────
+          // Any task whose goal is to find/show/report something needs a reply step.
+          const needsReport = /\b(find|search|show|look up|tell me|what|list|compare)\b/i.test(goal);
+          const lastStep = cleanSteps[cleanSteps.length - 1].toLowerCase();
+          const alreadyHasReport = /\b(report|summarise|summarize|reply|tell|show|list|compare|answer)\b/i.test(lastStep);
+          if (needsReport && !alreadyHasReport && cleanSteps.length < 2) {
+            cleanSteps.push('report the top results found — names, prices, and key details');
+          }
+
+          return {
+            steps: cleanSteps,
+            questions: allQuestions,
+            current: 0,
+            research_needed:  obj.research_needed === true,
+            research_skill:   obj.research_skill   || null,
+            research_args:    obj.research_args    || null,
+          };
+        }
       }
     } catch (_) {}
   }

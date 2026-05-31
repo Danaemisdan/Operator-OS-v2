@@ -650,11 +650,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
   async function handleTaskExecution(rawGoal) {
-  // Gather any missing info BEFORE planning — ask user simple questions
-  // if the task is underspecified (gatherMissingInfo was defined but never called)
-  rawGoal = await gatherMissingInfo(rawGoal);
-
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
+  // (questions handled by planner: LLM + deterministic pattern fallback)
   streamDiv = null;
   // Pass current page state so planner generates specific, contextual steps
   const wv0 = getActiveWebview();
