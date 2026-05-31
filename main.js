@@ -59,12 +59,20 @@ app.whenReady().then(() => {
     ? path.join(process.resourcesPath, 'Operator-engine-3b.gguf')
     : path.join(__dirname, 'Operator-engine-3b.gguf');
 
+  // Dev: use system 'node' (matches ABI llama native addon was compiled for)
+  // Packaged: no system node available — use Electron's own runtime with ELECTRON_RUN_AS_NODE
+  const nodeExec = isPackaged ? process.execPath : 'node';
+  const spawnEnv = isPackaged
+    ? { ...process.env, OPERATOR_MODEL_PATH: modelPath, ELECTRON_RUN_AS_NODE: '1' }
+    : { ...process.env, OPERATOR_MODEL_PATH: modelPath };
+
   console.log('[Main] Starting LLM server:', serverScript);
   console.log('[Main] Model path:', modelPath);
+  console.log('[Main] Node exec:', nodeExec);
 
-  llmProcess = spawn(process.execPath, [serverScript], {
+  llmProcess = spawn(nodeExec, [serverScript], {
     stdio: 'inherit',
-    env: { ...process.env, OPERATOR_MODEL_PATH: modelPath, ELECTRON_RUN_AS_NODE: '1' }
+    env: spawnEnv
   });
   llmProcess.on('error', (err) => console.error('[Main] LLM server spawn error:', err));
   llmProcess.on('exit', (code) => console.warn('[Main] LLM server exited with code:', code));
