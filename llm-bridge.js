@@ -316,6 +316,10 @@ RULES:
 
 // ─── Response parser ──────────────────────────────────────────────────────────
 function resolveResponse(fullContent, isChatMode, resolve) {
+  if (!isChatMode) {
+    // Log raw executor output so we can see what the model actually generates
+    console.log('[Executor output]:', JSON.stringify(fullContent.slice(0, 300)));
+  }
   if (isChatMode) {
     resolve({ tool: 'reply', args: { text: fullContent.trim() }, status: 'complete' });
     return;

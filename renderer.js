@@ -1119,8 +1119,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
         appendAiMessage(`⚠️ Step ${currentStepIdx + 1} stalled. Replanning (attempt ${replanCount}/${MAX_REPLANS})...`);
         try {
           const currentUrl = getActiveWebview()?.src || '';
-          // Always use the ORIGINAL executorGoal — never the enriched/modified one to avoid nesting
-          const failContext = `${executorGoal}\n[Note: step "${currentStep}" got stuck on ${currentUrl} after ${MAX_ACTIONS_PER_STEP} attempts. Create a fresh plan that avoids this step and reaches the goal differently.]`;
+          // Clean step description — strip any embedded [Note:...] from previous replans
+          const cleanStep = currentStep.split('\n')[0].split('[Note:')[0].trim().slice(0, 80);
+          const failContext = `${executorGoal}\n[Note: step "${cleanStep}" got stuck on ${currentUrl} after ${MAX_ACTIONS_PER_STEP} attempts. Create a fresh plan that avoids this step and reaches the goal differently.]`;
           streamDiv = null;
           const newPlan = await window.electronAPI.decomposeGoal(failContext, currentUrl);
           if (streamDiv) streamDiv = null;
