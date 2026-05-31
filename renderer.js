@@ -741,7 +741,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
         if (stepSkill && actionCount === 1) { // only assist on first action of a step
           appendAiMessage(`⚡ **${stepSkill.name}** — pipeline assist`);
           const wcId = wv?.getWebContentsId?.() || 0;
-          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, enrichedGoal, wcId, activeGraph || null);
+          // Pass the STEP text (not the full user goal) so extractArgs pulls the right query
+          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, currentStep, wcId, activeGraph || null);
           if (skillResult?.success !== false) {
             await delay(1000);
             await refreshActiveGraph(wv);

@@ -191,32 +191,26 @@ ${interactiveEls.slice(0, 15).map(e => {
     ? (hasChatPageContext
         ? `You are Operator, a browser AI. Answer ONLY from the page context below — never guess or hallucinate page content.\nBe concise.${pageContext}`
         : `You are Operator, a browser AI assistant. Be concise and conversational.`)
-    : `You are the Operator Executor Agent controlling a real browser.${pageContext}
-${memory ? `\nPast memory:\n${memory}` : ''}
-Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-6).join(' | ')}
+    : `You are a browser control agent. Your job is to take ONE action to move toward the goal.
+${pageContext}
+${memory ? `\nMemory: ${memory}` : ''}
+Actions taken: ${previousActions.length === 0 ? 'None yet' : previousActions.slice(-4).join(' | ')}
+
+Tools — pick ONE and respond with its JSON:
+- navigate to a URL:  {"tool":"navigate","args":{"text":"https://example.com"},"status":"running"}
+- click an element:   {"tool":"click","args":{"targetId":"BTN_001"},"status":"running"}
+- type into a field:  {"tool":"type","args":{"targetId":"INP_001","text":"your text"},"status":"running"}
+- press Enter/submit: {"tool":"press_enter","args":{},"status":"running"}
+- scroll the page:    {"tool":"scroll","args":{"text":"down"},"status":"running"}
+- report to user (ONLY when fully done): {"tool":"reply","args":{"text":"result here"},"status":"complete"}
 
 RULES:
-- Read the SITE field to know which website you are currently on before acting.
-- Read the PAGE TYPE field to understand the current page before deciding what to do.
-- If there is an [!] OVERLAY/POPUP section, handle those elements FIRST before touching anything else.
-- To reach a DIFFERENT website (e.g. from Google to LinkedIn): ALWAYS use navigate("https://site.com"). NEVER try to click LNK_ links to get to another domain — links labeled "[stays on X]" do NOT leave that site.
-- LNK_ links labeled "[stays on current-site]" are in-page navigation only. They will NOT take you to a different website.
-- INP_ = input field (type into it), BTN_ = button (click it), LNK_ = link (may stay on site — check label).
-- If the page shows "not found", "404", "page doesn't exist" → navigate to the site homepage instead.
-- If you are already on the correct site/page, do NOT navigate again — take the next action.
-- If a popup/modal/cookie banner is blocking, dismiss it first.
-- NEVER use the reply tool during execution. reply is only when the task is fully complete AND the answer/result is visible on screen.
-- NEVER output reply with text "No action." — this is always wrong. If you don't know what action to take: scroll down to see more content, or use ask_user.
-- If the current page shows SEARCH RESULTS and your goal requires reading prices/details: you MUST click a result first to navigate to the actual product/content page. Do NOT reply from search results.
-- If you already typed into a field, do NOT type again — press_enter or click submit.
-- If you already pressed enter, do NOT press enter again — read the new page first.
-- status="complete" ONLY when the goal result is actually visible on screen AND you used reply to report it.
-- ONE tool per response. No extra text outside the JSON.
-
-Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args), scroll(args.text=up|down), reply(args.text=result_summary), ask_user(args.text=question)
-
-Respond with ONLY this JSON:
-{"thought":"one sentence reasoning","expectation":"what should change after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":"If complete, summarize what was found/done, else null"}`;
+- Output ONLY the JSON. No explanation before or after.
+- To go to a different site: navigate with full https:// URL.
+- If there is a popup or overlay: dismiss it first (click its close/dismiss button).
+- On a search results page with products: click a result to go to the product page — do NOT reply yet.
+- NEVER reply unless the answer/data is actually on screen.
+- If you already typed: press_enter next. If you already pressed enter: read the new page.`;
 
   const messages = isChatMode
     ? [
@@ -356,8 +350,10 @@ function resolveResponse(fullContent, isChatMode, resolve) {
       },
     });
   } else {
-    // Model output couldn't be parsed as JSON — scroll the page as a safe default.
-    // This avoids the reply+complete trap that loops 7x against the observer.
+    // Last resort: try to extract an action from prose output
+    const proseAction = extractFromProse(fullContent);
+    if (proseAction) { resolve(proseAction); return; }
+    // Truly unparseable — scroll as safe default to give the model fresh context
     resolve({
       thought: 'Output unclear — scrolling to see more page content',
       expectation: 'More page content or elements become visible',
@@ -366,6 +362,42 @@ function resolveResponse(fullContent, isChatMode, resolve) {
       args: { targetId: null, text: 'down' },
     });
   }
+}
+
+// Extract a browser action from natural language output
+function extractFromProse(text) {
+  if (!text || text.length < 3) return null;
+  const t = text.trim();
+
+  // navigate("URL") or navigate to URL
+  const navFn = t.match(/navigate\(["']?(https?:\/\/[^\s"')]+)/i);
+  if (navFn) return { tool: 'navigate', args: { text: navFn[1], targetId: null }, status: 'running' };
+  const navTo = t.match(/(?:navigate|go)\s+to\s+["']?(https?:\/\/[^\s"',]+)/i);
+  if (navTo) return { tool: 'navigate', args: { text: navTo[1], targetId: null }, status: 'running' };
+  // bare domain: "navigate to amazon.com"
+  const navDomain = t.match(/(?:navigate|go)\s+to\s+["']?([a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\/[^\s"',]*)?)/i);
+  if (navDomain) return { tool: 'navigate', args: { text: 'https://' + navDomain[1], targetId: null }, status: 'running' };
+
+  // type "text" in INP_xxx  OR  type into INP_xxx "text"
+  const type1 = t.match(/type\s+["']([^"']+)["']\s+(?:in(?:to)?)\s+((?:INP|BTN|LNK)_\w+)/i);
+  if (type1) return { tool: 'type', args: { targetId: type1[2], text: type1[1] }, status: 'running' };
+  const type2 = t.match(/type\s+(?:in(?:to)?\s+)?((?:INP|BTN|LNK)_\w+)[\s,]+["']?([^"'\n]+)/i);
+  if (type2) return { tool: 'type', args: { targetId: type2[1], text: type2[2].trim() }, status: 'running' };
+
+  // click BTN_xxx / LNK_xxx / INP_xxx
+  const clickEl = t.match(/click\s+((?:BTN|LNK|INP)_\w+)/i);
+  if (clickEl) return { tool: 'click', args: { targetId: clickEl[1], text: null }, status: 'running' };
+
+  // press enter / submit
+  if (/press[_ ]enter|press_enter|hit enter|submit/i.test(t)) {
+    return { tool: 'press_enter', args: {}, status: 'running' };
+  }
+
+  // scroll down/up
+  if (/scroll\s*down/i.test(t)) return { tool: 'scroll', args: { text: 'down' }, status: 'running' };
+  if (/scroll\s*up/i.test(t)) return { tool: 'scroll', args: { text: 'up' }, status: 'running' };
+
+  return null;
 }
 
 module.exports = { analyzeUIWithLLM, chatAgentWithLLM };

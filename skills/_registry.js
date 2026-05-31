@@ -33,7 +33,7 @@ const skills = [
     description: 'Searches Google for a query.',
     requiresArgs: ['query'],
     steps: [
-      { action: 'navigate', url: 'https://www.google.com/search?q={{query}}', skipIf: { alreadyOnDomain: 'google.com', urlContains: 'search?q=' } },
+      { action: 'navigate', url: 'https://www.google.com/search?q={{query}}', skipIf: { urlContains: 'google.com/search?q=' } },
       { action: 'wait', ms: 1000 },
     ],
   },
