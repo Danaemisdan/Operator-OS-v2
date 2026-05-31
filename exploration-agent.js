@@ -551,5 +551,95 @@ function buildPageSummary(enrichedElements, pageKnowledge) {
   return lines.join('\n');
 }
 
+// ── Main exploration function ─────────────────────────────────────────────────
+async function explorePage({ graph, domain }) {
+  if (!graph || !graph.elements) return null;
+
+  const url   = graph.url   || '';
+  const title = graph.title || '';
+
+  // 1. Classify every interactive element
+  const enrichedElements = (graph.elements || []).map(el => {
+    const purpose = classifyElementPurpose(el);
+    if (purpose) return { ...el, _exploration: purpose };
+    return el;
+  });
+
+  // 2. Classify the page itself
+  const pagePurpose = classifyPagePurpose(url, title, enrichedElements);
+
+  // 3. Detect known flows
+  const flows = detectFlows(enrichedElements);
+
+  // 4. Extract structured element groups
+  const byCategory = (cat) => enrichedElements.filter(e => e._exploration?.category === cat);
+
+  const searchInputs = byCategory('search_input');
+  const applyButtons = byCategory('apply_button');
+  const formInputs   = enrichedElements.filter(e => e._exploration?.category?.startsWith('input_') || e._exploration?.category === 'form_input');
+  const dismissBtns  = [...byCategory('dismiss'), ...byCategory('cookie_accept')];
+  const filterCtrls  = enrichedElements.filter(e => e._exploration?.category?.startsWith('filter_'));
+  const authBtns     = [...byCategory('auth_login'), ...byCategory('auth_signup')];
+  const submitBtns   = byCategory('submit');
+
+  // 5. Build the page knowledge record
+  const pageKnowledge = {
+    url,
+    title,
+    purpose: pagePurpose,
+    mapped_at: new Date().toISOString(),
+    element_counts: {
+      total:         enrichedElements.length,
+      classified:    enrichedElements.filter(e => e._exploration).length,
+      search_inputs: searchInputs.length,
+      apply_buttons: applyButtons.length,
+      form_inputs:   formInputs.length,
+      dismiss_btns:  dismissBtns.length,
+      filter_ctrls:  filterCtrls.length,
+      auth_buttons:  authBtns.length,
+    },
+    key_elements: {
+      search_inputs:   searchInputs.map(e => ({ id: e.id, text: e.text, placeholder: e.placeholder })),
+      apply_buttons:   applyButtons.map(e => ({ id: e.id, text: e.text })),
+      dismiss_buttons: dismissBtns.map(e => ({ id: e.id, text: e.text })),
+      form_inputs:     formInputs.map(e  => ({ id: e.id, placeholder: e.placeholder, text: e.text, category: e._exploration?.category })),
+      submit_buttons:  submitBtns.map(e  => ({ id: e.id, text: e.text })),
+      auth_buttons:    authBtns.map(e    => ({ id: e.id, text: e.text })),
+      filters:         filterCtrls.map(e => ({ id: e.id, text: e.text })),
+    },
+    flows,
+    blockers: {
+      has_login_wall:    authBtns.length > 0 && (url.includes('login') || url.includes('signin')),
+      has_cookie_banner: dismissBtns.some(e => /(accept|cookie|privacy|agree)/i.test(e.text || '')),
+      has_popup:         dismissBtns.length > 0,
+    },
+  };
+
+  // 6. Build compact LLM-readable summary (injected into contextualStep)
+  pageKnowledge.llm_summary = buildPageSummary(enrichedElements, pageKnowledge);
+
+  return {
+    pageKnowledge,
+    enrichedElements,
+    domain: domain || (url.startsWith('http') ? new URL(url).hostname : url.split('/')[0]),
+  };
+}
+
+// ── Behavioral Learning ───────────────────────────────────────────────────────
+function buildBehaviorRecord({ domain, url, elementId, elementText, elementCategory, action, resultUrl, resultPagePurpose, resultElementsAppeared }) {
+  return {
+    domain,
+    url_pattern: url.replace(/\/\d+\/?/g, '/:id/').replace(/[?#].*$/, ''),
+    element: { id: elementId, text: elementText, category: elementCategory },
+    action,
+    result: {
+      url_changed:    resultUrl !== url,
+      result_url:     resultUrl,
+      result_purpose: resultPagePurpose,
+      appeared:       (resultElementsAppeared || []).slice(0, 8).map(e => ({ id: e.id, text: e.text, category: e._exploration?.category })),
+    },
+    recorded_at: new Date().toISOString(),
+  };
+}
 
 module.exports = { explorePage, classifyElementPurpose, classifyPagePurpose, detectFlows, buildPageSummary, buildBehaviorRecord };
