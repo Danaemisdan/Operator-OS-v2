@@ -152,6 +152,21 @@ function createTab(url = 'https://google.com') {
 
   webview.addEventListener('did-stop-loading', () => {
     if (activeTabId === tabId) hideLoading();
+    // If the tab title is still "Loading...", pull the real title from the webview
+    const titleEl = tabEl.querySelector('.tab-title');
+    if (titleEl && titleEl.textContent === 'Loading...') {
+      try {
+        const realTitle = webview.getTitle();
+        if (realTitle && realTitle !== 'Loading...') {
+          titleEl.textContent = realTitle;
+        } else {
+          // Fall back to hostname if title is empty or still wrong
+          try {
+            titleEl.textContent = new URL(webview.src).hostname || 'New Tab';
+          } catch (_) { titleEl.textContent = 'New Tab'; }
+        }
+      } catch (_) {}
+    }
   });
   
   webview.addEventListener('dom-ready', async () => {

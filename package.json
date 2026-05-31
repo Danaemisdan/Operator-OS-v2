@@ -1,11 +1,12 @@
 {
   "name": "operator-os",
   "version": "1.0.0",
-  "description": "",
+  "description": "Operator OS — AI Browser Agent",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:win": "electron-builder --win zip --x64"
   },
   "repository": {
     "type": "git",
@@ -19,8 +20,42 @@
     "url": "https://github.com/Danaemisdan/operator-OS/issues"
   },
   "homepage": "https://github.com/Danaemisdan/operator-OS#readme",
+  "build": {
+    "appId": "com.operatoros.app",
+    "productName": "Operator OS",
+    "asar": true,
+    "files": [
+      "**/*",
+      "!node_modules/@node-llama-cpp/mac-*/**",
+      "!node_modules/@reflink/reflink-darwin-*/**",
+      "!node_modules/iconv-corefoundation/**",
+      "!**/*.map",
+      "!**/*.md",
+      "!.git/**",
+      "!dist/**",
+      "!scratch_*"
+    ],
+    "extraResources": [
+      {
+        "from": "Operator-engine-3b.gguf",
+        "to": "Operator-engine-3b.gguf"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
   "devDependencies": {
-    "electron": "^42.3.0"
+    "electron": "^42.3.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "node-llama-cpp": "^3.18.1"
