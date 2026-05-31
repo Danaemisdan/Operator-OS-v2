@@ -144,7 +144,7 @@ ipcMain.handle('analyze-ui-llm', async (event, graph) => {
   }
 });
 
-ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, memory, conversationHistory, silent }) => {
+ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, memory, conversationHistory, pageSummary }) => {
   try {
     const result = await chatAgentWithLLM(
       prompt,
@@ -153,7 +153,8 @@ ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, mem
       event.sender,
       memory || '',
       conversationHistory || [],
-      silent || false
+      false,
+      pageSummary || ''
     );
     return result;
   } catch (error) {
@@ -220,9 +221,9 @@ ipcMain.handle('execute-skill', async (event, { skillId, goalText, webContentsId
 });
 
 // --- Manager: Decompose Goal ---
-ipcMain.handle('decompose-goal', async (event, { goal, currentUrl }) => {
+ipcMain.handle('decompose-goal', async (event, { goal, currentUrl, pageContext }) => {
   const skillNames = skills.map(s => s.name);
-  return await decomposeGoal(goal, skillNames, currentUrl, event.sender);
+  return await decomposeGoal(goal, skillNames, currentUrl, event.sender, pageContext || null);
 });
 
 // --- DOM Pruner ---

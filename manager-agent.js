@@ -3,61 +3,72 @@
 const http = require('http');
 
 /**
- * Call the local LLM via streaming SSE to decompose a high-level goal
- * into 2–5 sequential steps.
- *
- * @param {string}   goal            - The high-level goal string.
- * @param {string[]} availableSkills - Names of skills the agent can use.
- * @param {string}   currentUrl      - The current browser URL (context).
- * @param {object}   sender          - Electron WebContents (or null) for streaming chunks to renderer.
- * @returns {Promise<{ steps: string[], current: number }>}
+ * Call the local LLM to decompose a high-level goal into 2–5 richly-described steps.
+ * The planner ALWAYS runs. Skills are execution pipeline tools — not plan replacements.
  */
-async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
+async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageContext) {
+  // pageContext: optional { url, title, pageType, pageSummary } from exploration
+  const ctx = pageContext || {};
+  const pageInfo = ctx.url
+    ? `Current page: ${ctx.url}\nPage type: ${ctx.pageType || 'unknown'}\nPage title: ${ctx.title || ''}`
+    : `Current page: ${currentUrl || 'New tab (no page loaded)'}`;
+
   const prompt =
-    `You are a task planning agent. Break the user's goal into 2-5 clear, sequential browser steps.\n` +
+    `You are a smart browser task planning agent. Your job is to break the user's goal into 2-5 specific, richly-described sequential steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
-    `STEPS FORMAT RULES:\n` +
-    `- Every step MUST be a plain English sentence string. NEVER put a JSON object or raw URL inside steps[].\n` +
-    `- Navigate steps: say the site name only — "navigate to Instagram", "navigate to Amazon". Never include raw URLs.\n` +
-    `- Never construct deep URL paths — let the site's own search/nav do the work once you arrive.\n` +
-    `- Steps describe WHAT to do, not HOW to do it in the browser. The executor figures out the HOW.\n` +
-    `  GOOD: "navigate to Amazon", "search for Sony WH-1000XM5", "click the first product result"\n` +
-    `  BAD: "type amazon.com into the address bar", "type into the search box", "navigate https://..."\n\n` +
-    `CLARIFYING QUESTIONS — if the goal is ambiguous, ask before planning:\n` +
-    `Ask when missing info directly changes what site to use, what to search for, or who/what to target.\n` +
+
+    `STEP QUALITY RULES — this is the most important part:\n` +
+    `- Steps must be GOAL-LEVEL descriptions, not browser instructions. The executor handles clicking/typing.\n` +
+    `- Steps must be SPECIFIC to this exact goal — include the actual names, queries, targets from the goal.\n` +
+    `- GOOD: "navigate to LinkedIn", "search for 'software engineer jobs in Bangalore'", "click the first job listing that matches the goal"\n` +
+    `- BAD: "navigate to a job site", "search for jobs", "click a result" — too vague, the executor is lost\n` +
+    `- Navigate steps: name the site — "navigate to LinkedIn", "navigate to Amazon". Never raw URLs.\n` +
+    `- Search steps: include the exact search query derived from the goal.\n` +
+    `- Click steps: describe what to click based on expected content — "click the first result that mentions X"\n` +
+    `- If the goal involves reading/extracting info: add a final step "read and report the [price/name/result] to the user"\n\n` +
+
+    `CLARIFYING QUESTIONS — ask ONLY when the answer structurally changes the plan:\n` +
+    `- What to search for is unknown → ask\n` +
+    `- Which platform to use is ambiguous → ask  \n` +
+    `- A specific name/date/location is needed → ask\n` +
     `Examples REQUIRING questions:\n` +
-    `  "follow people on instagram" → ask: which account to target? any specific criteria?\n` +
-    `  "find me a job" → ask: what role? what location?\n` +
-    `  "buy something" → ask: what product? what budget?\n` +
-    `  "book a flight" → ask: from where? to where? when?\n` +
+    `  "find me a job" → ask: what role? what location? remote or on-site?\n` +
+    `  "follow people on instagram" → ask: follow people from where? any search criteria?\n` +
+    `  "book a flight" → ask: from? to? when? how many passengers?\n` +
+    `  "buy something for my mom" → ask: what kind of thing? what budget?\n` +
     `Examples NOT requiring questions:\n` +
-    `  "search youtube for lofi music" → specific enough\n` +
+    `  "search youtube for lofi music" → fully specified\n` +
     `  "open amazon" → obvious destination\n` +
+    `  "search Amazon for Sony WH-1000XM5 and tell me the price" → fully specified\n` +
     `Max 2 questions. Return questions:[] if goal is fully specified.\n\n` +
-    `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
-    `- searchLeads: returns structured list of people matching a role/industry/location\n` +
-    `- lookupCompany: returns structured data about a named company\n` +
-    `- lookupApp: returns structured data about a named software/app\n` +
-    `- searchNews: returns recent news articles on a topic\n` +
-    `- extractPageData: extracts structured data from a URL\n\n` +
-    `RESEARCH GATE — set research_needed=true only if research output feeds directly into browser steps.\n\n` +
-    `Output format (steps[] contains ONLY plain string sentences):\n` +
-    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["sentence 1","sentence 2"]}\n\n` +
-    `Goal: "${goal}"\n` +
-    `Current page: ${currentUrl || 'New tab'}\n` +
-    `Available skills: ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
+
+    `AVAILABLE SKILLS (execution pipeline shortcuts — use them in steps when relevant):\n` +
+    `${availableSkills.length > 0 ? availableSkills.map(s => `- ${s}`).join('\n') : '- (none)'}\n` +
+    `Skills run inside the executor pipeline — they don't replace planning. Just mention the goal in the step.\n\n` +
+
+    `RESEARCH TOOLS (headless, run before browser opens):\n` +
+    `- searchLeads: structured list of people by role/industry/location\n` +
+    `- lookupCompany: structured data about a company\n` +
+    `- lookupApp: structured data about a software/app\n` +
+    `- searchNews: recent news on a topic\n` +
+    `- extractPageData: extract structured data from a URL\n` +
+    `Set research_needed=true ONLY if research output directly feeds into browser steps.\n\n` +
+
+    `Output format:\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["specific step 1","specific step 2"]}\n\n` +
+
+    `${pageInfo}\n` +
+    `Goal: "${goal}"\n\n` +
     `Output ONLY JSON:`;
-
-
 
   const body = JSON.stringify({
     model: 'operator-engine-3b',
     messages: [
-      { role: 'system', content: 'You are a JSON-only planning agent. Never write prose. Always respond with only a raw JSON object.' },
+      { role: 'system', content: 'You are a JSON-only planning agent. Never write prose. Always respond with only a raw JSON object. Be specific — include the actual names, queries, and targets from the goal in every step.' },
       { role: 'user', content: prompt }
     ],
     temperature: 0.15,
-    max_tokens: 400,
+    max_tokens: 500,
     stream: true,
   });
 
@@ -112,13 +123,8 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
 
 /**
  * Multi-strategy parser for the model's response.
- * Strategy 1: Find and parse a JSON block with a "steps" array.
- * Strategy 2: Extract numbered list lines from prose as fallback.
- * Always strips "Step N:" prefixes from step text.
  */
 function parseSteps(full, goal) {
-  // Strategy 1: find ANY valid JSON object containing a "steps" array
-  // Use greedy match but also try all JSON-like substrings in case model adds trailing text
   const jsonCandidates = [];
   let depth = 0, start = -1;
   for (let i = 0; i < full.length; i++) {
@@ -137,17 +143,14 @@ function parseSteps(full, goal) {
       if (Array.isArray(obj.steps) && obj.steps.length > 0) {
         const steps = obj.steps
           .map(s => {
-            // Step is a JSON object — extract the most meaningful text from all possible fields
             if (s && typeof s === 'object') {
               const a = s.action || s.type || '';
               const detail = s.url || s.text || s.query || s.target ||
                 s.searchTerm || s.searchQuery || s.term || s.value ||
                 s.description || s.step || s.instruction || '';
-              // Build a readable sentence instead of stringifying the object
               if (a && detail) return `${a} ${detail}`.trim();
               if (detail) return detail;
               if (a) return a;
-              // Last resort: join all string values
               const vals = Object.values(s).filter(v => typeof v === 'string' && v.length > 2);
               return vals.length > 0 ? vals.join(' ') : JSON.stringify(s);
             }
@@ -155,7 +158,7 @@ function parseSteps(full, goal) {
           })
           .map(s => s
             .replace(/^(\d+[.)]\s*)/, '')
-            .replace(/^(step\s*\d+\s*[:.)\-]\s*)/i, '')
+            .replace(/^(step\s*\d+\s*[:.)\\-]\s*)/i, '')
             .trim()
           )
           .filter(s => s.length > 3 && s !== '[object Object]');
@@ -171,28 +174,18 @@ function parseSteps(full, goal) {
     } catch (_) {}
   }
 
-  // Strategy 2: extract numbered lines from prose (e.g. "1. Do this\n2. Do that")
+  // Strategy 2: extract numbered lines from prose
   const lines = full.split('\n');
   const numbered = lines
     .map(l => l.trim())
-    .filter(l => /^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i.test(l))
-    .map(l => l.replace(/^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\-]\s*)/i, '').trim())
+    .filter(l => /^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\\-]\s*)/i.test(l))
+    .map(l => l.replace(/^(\d+[.\)]\s+|[-•*]\s+|step\s*\d+[:.\\-]\s*)/i, '').trim())
     .filter(l => l.length > 5);
   if (numbered.length > 0) return { steps: numbered, questions: [], current: 0, research_needed: false, research_skill: null, research_args: null };
 
-  // Final fallback: treat the whole goal as a single step
   return { steps: [goal], questions: [], current: 0, research_needed: false, research_skill: null, research_args: null };
 }
 
-/**
- * Execute a plan produced by decomposeGoal.
- * Iterates through steps and invokes the provided executor for each.
- *
- * @param {{ steps: string[], current: number }} plan
- * @param {function} stepExecutor - async (step: string, index: number) => void
- * @param {function} onProgress   - (current: number, total: number, step: string) => void
- * @returns {Promise<void>}
- */
 async function executePlan(plan, stepExecutor, onProgress) {
   const { steps } = plan;
   for (let i = plan.current; i < steps.length; i++) {

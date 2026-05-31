@@ -146,45 +146,43 @@ function analyzeUIWithLLM(graph) {
 }
 
 // ─── Main Agent Chat (with full conversation history for chat mode) ────────────
-async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false) {
+// pageSummary: pre-computed heuristic llm_summary from explorePage() — use this
+// instead of raw elements when available. Shorter prompt = faster inference.
+async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '') {
   // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
   const isChatMode = !graph.url && (!graph.elements || graph.elements.length === 0);
 
-  // Build page context — always inject when we have a real graph (both chat AND executor)
+  // Build page context — prefer pre-computed heuristic summary (instant, compact)
+  // over rebuilding from raw elements (slow, noisy)
   let pageContext = '';
-  if (graph.url || (graph.elements && graph.elements.length > 0)) {
-    const els = graph.elements || [];
-
-    // Visible text content — what the user actually SEES on the page
-    const textContent = els
-      .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
-      .slice(0, 12)
-      .map(e => e.text.trim())
-      .join(' | ');
-
-    // Link labels visible on page (text of links, not their hrefs)
-    const linkLabels = els
-      .filter(e => e.id && e.id.startsWith('LNK') && e.text && e.text.length > 1 && e.text.length < 40)
-      .slice(0, 10)
-      .map(e => e.text.trim())
-      .join(', ');
-
-    // Interactive elements (for executor mode)
-    const interactiveEls = els.filter(e =>
-      e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
-    );
-
-    pageContext = `\n\nCurrent browser page:
+  const hasPage = graph.url || (graph.elements && graph.elements.length > 0);
+  if (hasPage) {
+    if (pageSummary) {
+      // Use pre-computed heuristic exploration summary — already classified, structured
+      pageContext = `\n\nCurrent browser page:
+- URL: ${graph.url || 'unknown'}
+- Title: ${graph.title || 'Unknown'}
+${pageSummary}`;
+    } else {
+      // Fallback: build from raw elements (used when exploration hasn't run yet)
+      const els = graph.elements || [];
+      const textContent = els
+        .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
+        .slice(0, 10).map(e => e.text.trim()).join(' | ');
+      const interactiveEls = els.filter(e =>
+        e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
+      );
+      pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
 - Page type: ${graph.semanticPattern || 'Unknown'}
-- Visible page text: ${textContent || '(none captured)'}
-- Visible links/buttons: ${linkLabels || '(none)'}
-- Interactive elements (${interactiveEls.length} total):
+- Visible text: ${textContent || '(none)'}
+- Interactive elements (${interactiveEls.length}):
 ${interactiveEls.slice(0, 15).map(e => {
-  const val = e.value ? ` [current value: "${e.value}"]` : '';
-  return `  [${e.id}] "${e.text || ''}"${val} — ${e.predictedEffect || e.role || ''}`;
+  const val = e.value ? ` [value: "${e.value}"]` : '';
+  return `  [${e.id}] "${e.text || e.placeholder || ''}"${val} — ${e.predictedEffect || e._exploration?.purpose || e.role || ''}`;
 }).join('\n')}`;
+    }
   }
 
   // Chat system prompt: minimal by default, expanded only when page context is attached

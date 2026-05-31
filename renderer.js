@@ -402,37 +402,66 @@ async function handleChatSubmit() {
 
 
   if (intent === 'chat') {
-    // ── Selective knowledge graph injection ──────────────────────────────────
-    // The activeGraph is maintained by the background DOM monitor — no re-fetch needed.
-    // Only inject what the query actually needs:
-    //   • Pure conversational ("hey", "thanks") → no context, max speed
-    //   • Page-awareness query ("what page", "where am I") → url + title only
-    //   • Element-level query ("what buttons", "what can I click") → + top elements
-    const q = goalText.toLowerCase();
-    const PAGE_KEYWORDS    = ['page', 'site', 'url', 'where', 'current', 'here', 'open', 'showing', 'which'];
-    const ELEMENT_KEYWORDS = ['button', 'link', 'element', 'click', 'see', 'screen', 'show', 'what', 'list'];
+    const q = goalText.toLowerCase().trim();
 
-    const wantsPage    = PAGE_KEYWORDS.some(k => q.includes(k));
+    // ── FAST PATH: page-reading questions answered INSTANTLY from heuristic summary ──
+    // explorePage() runs on every page load (0ms, no LLM). Questions about what's
+    // visible on screen should NEVER go through inference — answer from the cache.
+    const PAGE_READ_TRIGGERS = [
+      'what is on', "what's on", 'whats on', 'what do you see', 'what can i see',
+      'what can i click', 'what buttons', 'what links', 'what elements', 'describe the page',
+      'describe what', 'what inputs', 'what forms', 'what is here', "what's here",
+      'show me the page', 'tell me what', 'list the', 'summarize the page',
+      'what text', 'what is visible', "what's visible", 'any popup', 'any modal',
+      'what fields', 'what options', 'what tabs',
+    ];
+    const isPageReadQ = PAGE_READ_TRIGGERS.some(t => q.includes(t));
+
+    if (isPageReadQ && activeGraph) {
+      const summary = activeGraph._exploration?.llm_summary;
+      if (summary) {
+        const reply = `**${activeGraph.title || 'Page'}** (${activeGraph.url || ''})\n\n${summary}`;
+        appendAiMessage(reply);
+        pushToHistory(goalText, reply);
+        return;
+      }
+      // Exploration not ready — build fast reply from raw elements
+      if (activeGraph.elements?.length) {
+        const btns  = activeGraph.elements.filter(e => e.id?.startsWith('BTN')).slice(0, 6).map(e => `${e.id} "${(e.text||'').substring(0,30)}"`);
+        const inps  = activeGraph.elements.filter(e => e.id?.startsWith('INP')).slice(0, 4).map(e => `${e.id} [${(e.placeholder||e.ariaLabel||'').substring(0,30)}]`);
+        const links = activeGraph.elements.filter(e => e.id?.startsWith('LNK')).slice(0, 5).map(e => `${e.id} "${(e.text||'').substring(0,30)}"`);
+        const txts  = activeGraph.elements.filter(e => e.id?.startsWith('TXT')).slice(0, 4).map(e => `"${(e.text||'').substring(0,60)}"`);
+        const parts = [];
+        if (txts.length)  parts.push(`**Text:** ${txts.join(' | ')}`);
+        if (btns.length)  parts.push(`**Buttons:** ${btns.join(', ')}`);
+        if (inps.length)  parts.push(`**Inputs:** ${inps.join(', ')}`);
+        if (links.length) parts.push(`**Links:** ${links.join(', ')}`);
+        const reply = `**${activeGraph.title||'Page'}** (${activeGraph.url||''})\n\n${parts.join('\n') || '(No elements detected)'}`;
+        appendAiMessage(reply);
+        pushToHistory(goalText, reply);
+        return;
+      }
+    }
+
+    // ── Normal chat: LLM with compact context ────────────────────────────────
+    const PAGE_KEYWORDS    = ['page', 'site', 'url', 'where', 'current', 'here', 'showing', 'which'];
+    const ELEMENT_KEYWORDS = ['button', 'link', 'element', 'click', 'see', 'screen'];
+    const wantsPage     = PAGE_KEYWORDS.some(k => q.includes(k));
     const wantsElements = ELEMENT_KEYWORDS.some(k => q.includes(k));
 
-    let chatGraph = { url: '', title: '', elements: [] }; // default: no context
+    // Use compact llm_summary instead of raw elements — much shorter prompt = faster
+    let chatGraph = { url: '', title: '', elements: [] };
+    let pageSummaryForChat = '';
     if (activeGraph) {
-      if (wantsPage && wantsElements) {
-        // Full element context — use cached graph, no re-fetch
-        chatGraph = activeGraph;
-      } else if (wantsPage) {
-        // Just location — tiny context, instant
-        chatGraph = { url: activeGraph.url, title: activeGraph.title, elements: [], semanticPattern: activeGraph.semanticPattern };
+      chatGraph = { url: activeGraph.url, title: activeGraph.title, elements: [] };
+      if (wantsPage || wantsElements) {
+        pageSummaryForChat = activeGraph._exploration?.llm_summary || '';
       }
-      // else: pure conversational → empty graph → model gets no page noise
     }
 
     streamDiv = null;
     const chatResponse = await window.electronAPI.agentChat(
-      goalText,
-      chatGraph,
-      [], '',
-      conversationHistory
+      goalText, chatGraph, [], '', conversationHistory, pageSummaryForChat
     );
 
     const alreadyStreamed = !!streamDiv;
@@ -594,7 +623,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
   streamDiv = null;
-  const plan = await window.electronAPI.decomposeGoal(rawGoal, getActiveWebview().src);
+  // Pass current page state so planner generates specific, contextual steps
+  const wv0 = getActiveWebview();
+  const planPageCtx = activeGraph ? {
+    url: activeGraph.url || (wv0 && wv0.src) || '',
+    title: activeGraph.title || '',
+    pageType: activeGraph._exploration?.purpose || activeGraph.semanticPattern || 'unknown',
+  } : null;
+  const plan = await window.electronAPI.decomposeGoal(rawGoal, (wv0 && wv0.src) || '', planPageCtx);
   if (streamDiv) streamDiv = null;
 
   // If the planner identified missing info, ask before doing anything
@@ -608,7 +644,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
     }
     // Replan with the enriched goal so steps reflect the user's answers
     streamDiv = null;
-    const refinedPlan = await window.electronAPI.decomposeGoal(enrichedGoal, getActiveWebview().src);
+    const wv1 = getActiveWebview();
+    const refinedPlan = await window.electronAPI.decomposeGoal(enrichedGoal, (wv1 && wv1.src) || '', planPageCtx);
     if (streamDiv) streamDiv = null;
     Object.assign(plan, refinedPlan);
   }
@@ -695,57 +732,24 @@ Return ONLY a JSON array of question strings, nothing else.`;
         await refreshActiveGraph(wv);
         if (!activeGraph) { appendAiMessage('⚠️ Cannot read page.'); break; }
 
-        // ── Skill step check: if this planned step matches a built-in skill,
-        //    execute it directly instead of the action-by-action LLM executor.
-        //    The LLM still planned it, gatherMissingInfo still ran.
-        //    Observer ALWAYS verifies the actual result — not just "did page change".
+        // ── Skill pipeline: skills run as a fast-path assist before the LLM.
+        //    They inject their result into previousActions as context.
+        //    The LLM executor ALWAYS runs after — it verifies, completes, or corrects.
+        //    Skills are helpers, never replacements for the agent's reasoning.
         const stepSkill = await window.electronAPI.matchSkill(currentStep);
-        if (stepSkill) {
-          appendAiMessage(`⚡ **${stepSkill.name}** — executing step`);
+        if (stepSkill && actionCount === 1) { // only assist on first action of a step
+          appendAiMessage(`⚡ **${stepSkill.name}** — pipeline assist`);
           const wcId = wv?.getWebContentsId?.() || 0;
-          // Use enrichedGoal (user's actual intent) for arg extraction, NOT the step text.
-          // The step identifies which skill; the goal says what to search for.
           const skillResult = await window.electronAPI.executeSkill(stepSkill.id, enrichedGoal, wcId, activeGraph || null);
           if (skillResult?.success !== false) {
-            await delay(1500);
+            await delay(1000);
             await refreshActiveGraph(wv);
-
-            // ── Observer verification — same as LLM executor path ──────────
-            // "Page changed" is NOT enough. Observer checks actual goal content.
-            tpp.setThought(`Verifying skill result: ${currentStep.substring(0, 70)}`);
-            const obs = await window.electronAPI.observePage({
-              graph: activeGraph,
-              lastAction: `skill:${stepSkill.id} for "${currentStep}"`,
-              expectation: `The goal "${currentStep}" should now be visibly achieved on screen`,
-              goalContext: enrichedGoal,
-            });
-
-            if (obs.blockers && obs.blockers.length > 0) {
-              appendAiMessage(`⚠️ Blocker after skill: **${obs.blockers.join(', ')}** — LLM resolving`);
-              previousActions.push(`Skill ran but blocked: ${obs.blockers.join(', ')}. ${obs.next_hint}`);
-              // Don't advance — let LLM executor handle the blocker
-            } else if (!obs.action_succeeded && obs.confidence > 0.6) {
-              appendAiMessage(`❌ Observer: skill didn't achieve goal — ${obs.what_changed}. LLM taking over`);
-              previousActions.push(`Skill ${stepSkill.name} ran but goal not achieved: ${obs.what_changed}. Hint: ${obs.next_hint}`);
-              // Don't advance — LLM executor will fix it
-            } else {
-              // Verified ✅
-              await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'skill', outcome: 'success', detail: obs.what_changed });
-              tpp.stepDone(currentStepIdx);
-              currentStepIdx++;
-              if (currentStepIdx >= plan.steps.length) {
-                appendAiMessage(`✅ **All ${plan.steps.length} steps done!** — ${obs.what_changed}`);
-                isComplete = true; tpp.complete();
-              } else {
-                appendAiMessage(`✅ Step done (${obs.what_changed}) → **${plan.steps[currentStepIdx]}**`);
-                tpp.setStep(currentStepIdx);
-                previousActions = [`Skill ${stepSkill.name} verified: ${obs.what_changed}`];
-              }
-              break; // exit inner while, continue outer step loop
-            }
+            const skillSummary = skillResult?.detail || skillResult?.message || `${stepSkill.name} completed`;
+            previousActions.push(`[Skill ${stepSkill.name} ran] → ${skillSummary}. Verify this is correct and continue.`);
           } else {
-            appendAiMessage(`⚠️ Skill failed — LLM executor taking over`);
+            previousActions.push(`[Skill ${stepSkill.name} failed] → Proceed manually.`);
           }
+          // Always fall through to LLM executor — never break here
         }
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);

@@ -8,8 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   analyzeUI:      (g) => ipcRenderer.invoke('analyze-ui-llm', g),
 
   // Agent
-  agentChat: (prompt, graph, prev, memory, history, silent) =>
-    ipcRenderer.invoke('agent-chat', { prompt, graph, previousActions: prev, memory, conversationHistory: history, silent }),
+  agentChat: (prompt, graph, prev, memory, history, pageSummary) =>
+    ipcRenderer.invoke('agent-chat', { prompt, graph, previousActions: prev, memory, conversationHistory: history, pageSummary: pageSummary || '' }),
 
   // Streams
   onAgentStream:    (cb) => ipcRenderer.on('agent-stream-chunk',   (_, t) => cb(t)),
@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   classifyIntent: (msg)                        => ipcRenderer.invoke('classify-intent', msg),
   matchSkill:     (goal)                       => ipcRenderer.invoke('match-skill', goal),
   executeSkill:   (id, goal, wcId, graph)      => ipcRenderer.invoke('execute-skill', { skillId: id, goalText: goal, webContentsId: wcId, currentGraph: graph }),
-  decomposeGoal:  (goal, url)                  => ipcRenderer.invoke('decompose-goal', { goal, currentUrl: url }),
+  decomposeGoal:  (goal, url, pageContext)      => ipcRenderer.invoke('decompose-goal', { goal, currentUrl: url, pageContext }),
   pruneGraph:     (graph, goal)                => ipcRenderer.invoke('prune-graph', { graph, goalText: goal }),
 
   // Episodic memory

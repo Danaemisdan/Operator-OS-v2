@@ -237,23 +237,41 @@
         depth++;
       }
   
+      // — Detect if this element is inside an overlay/modal/popup (z-index > 100, position fixed/sticky)
+      let zIndexVal = 0;
+      let isOverlay = false;
+      let scanNode = node;
+      for (let d = 0; d < 6 && scanNode && scanNode !== document.body; d++) {
+        const s = window.getComputedStyle(scanNode);
+        const z = parseInt(s.zIndex, 10);
+        const pos = s.position;
+        if (!isNaN(z) && z > zIndexVal) zIndexVal = z;
+        if (!isNaN(z) && z > 100 && (pos === 'fixed' || pos === 'absolute' || pos === 'sticky')) {
+          isOverlay = true;
+        }
+        scanNode = scanNode.parentElement;
+      }
+
       elements.push({
         id:          id,
-        tag:         node.tagName.toLowerCase(),                          // html tag: input, button, a, select…
-        type:        node.tagName.toLowerCase(),                          // kept for back-compat
-        inputType:   node.getAttribute('type') || '',                    // input type attr: text, submit, email, password, checkbox…
+        tag:         node.tagName.toLowerCase(),
+        type:        node.tagName.toLowerCase(),
+        inputType:   node.getAttribute('type') || '',
         text:        text.substring(0, 500).replace(/\n/g, ' '),
-        href:        node.href || node.getAttribute('href') || '',        // full resolved href for <a>
-        hrefRaw:     node.getAttribute('href') || '',                    // raw href (relative paths, #anchors, javascript:)
+        href:        node.href || node.getAttribute('href') || '',
+        hrefRaw:     node.getAttribute('href') || '',
         placeholder: node.placeholder || node.getAttribute('placeholder') || '',
-        name:        node.getAttribute('name') || '',                    // form field name attr (e.g. name="q" for Google search)
+        name:        node.getAttribute('name') || '',
         value:       (node.tagName === 'INPUT' || node.tagName === 'BUTTON') ? (node.value || node.getAttribute('value') || '') : '',
         ariaLabel:   node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '',
         role:        node.getAttribute('role') || node.tagName.toLowerCase(),
         src:         node.src || node.currentSrc || '',
         parentContext: parentContext.trim(),
-        hasChildren: node.querySelector('input,button,select,textarea') !== null, // is a container with interactive children
-        position:    { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+        hasChildren: node.querySelector('input,button,select,textarea') !== null,
+        position:    { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+        zIndex:      zIndexVal,
+        isOverlay:   isOverlay,
+        layer:       isOverlay ? 'overlay' : 'page',
       });
     });
   
