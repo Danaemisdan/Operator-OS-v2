@@ -585,9 +585,10 @@ Max 2 questions. Return [] if the goal is specific enough to start.
 Return ONLY a JSON array of question strings, nothing else.`;
 
     try {
-      // Use silent mode — we only want the raw text, no stream rendering
+      // Use a suppress sentinel so incoming stream tokens are absorbed silently
+      // (setting to null would cause the stream handler to create a new chat bubble)
       const _savedStream = streamDiv;
-      streamDiv = null;
+      streamDiv = { _suppress: true, textContent: '' };
       const resp = await window.electronAPI.agentChat(
         gatherPrompt,
         { url: '', title: '', elements: [] },
@@ -1137,23 +1138,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
           }
         }
 
-        // ── Loop detection: same action + target + URL, 3 times in a row ────
-        // Doesn't hardcode what to do — just gives the LLM strong evidence it's stuck
-        const fingerprint = `${action}::${args?.targetId || args?.text?.slice(0,20) || ''}::${wv.src}`;
-        if (fingerprint === lastActionFingerprint) {
-          consecutiveSameAction++;
-          if (consecutiveSameAction >= 2) {
-            appendAiMessage(`⚠️ Same action repeated ${consecutiveSameAction + 1}x with no change.`);
-            previousActions.push(
-              `STUCK: The action "${action}" on "${args?.targetId || args?.text?.slice(0,30)}" ` +
-              `has been attempted ${consecutiveSameAction + 1} times in a row and the page has not changed. ` +
-              `This approach is not working. Look at the current page elements and try a completely different element or approach.`
-            );
-          }
-        } else {
-          lastActionFingerprint = fingerprint;
-          consecutiveSameAction = 0;
-        }
+        // Stall detection now handled by noChangedCount (page diff engine above)
 
         appendAiMessage(msg);
         await delay(1000);
