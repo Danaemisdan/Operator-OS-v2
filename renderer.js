@@ -685,7 +685,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
   let isComplete = false;
   let previousActions = [];
   let currentStepIdx = 0;
-  const MAX_ACTIONS_PER_STEP = 12;
+  let replanCount = 0;
+  const MAX_REPLANS = 2;
+  const MAX_ACTIONS_PER_STEP = 7;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   while (!isComplete && currentStepIdx < plan.steps.length) {
@@ -782,11 +784,19 @@ Return ONLY a JSON array of question strings, nothing else.`;
           isComplete = true; break;
         }
 
-        // ── Hard catch: executor said "No action." — model is confused, force retry ──
-        const replyText2 = (agentResponse.args?.text || '').trim().toLowerCase();
-        if (agentResponse.tool === 'reply' && (replyText2 === 'no action.' || replyText2 === 'no action' || replyText2 === '')) {
-          previousActions.push(`You responded "No action." which is wrong — you MUST take a concrete browser action. Look at the current page elements and either: click a relevant link/button, type in a search box, or navigate to the right URL. Do NOT use reply unless you have real data to report.`);
-          await delay(500);
+        // ── Hard catch: executor gave a non-meaningful reply (confused model) ──
+        const replyTxt = (agentResponse.args?.text || '').trim().toLowerCase();
+        const isConfusedReply = agentResponse.tool === 'reply' && (
+          !agentResponse.args?.text ||          // null/undefined text
+          replyTxt === 'no action.' ||
+          replyTxt === 'no action' ||
+          replyTxt === '' ||
+          replyTxt === 'none' ||
+          replyTxt === 'n/a'
+        );
+        if (isConfusedReply) {
+          previousActions.push(`WRONG: Do not reply with "${agentResponse.args?.text || 'empty'}" — take a real browser action: navigate to the right URL, type in a search box, or click an element on the page.`);
+          await delay(400);
           continue;
         }
 
@@ -1100,27 +1110,33 @@ Return ONLY a JSON array of question strings, nothing else.`;
     } // inner
 
     if (actionCount >= MAX_ACTIONS_PER_STEP && !isComplete) {
-      // Don't just give up — replan from current reality
-      appendAiMessage(`⚠️ Step ${currentStepIdx + 1} stalled. Replanning from current page...`);
-      try {
-        const currentUrl = getActiveWebview()?.src || '';
-        const failContext = `${enrichedGoal}\n[Step "${currentStep}" failed after ${MAX_ACTIONS_PER_STEP} attempts on ${currentUrl}. Replan the remaining steps from here.]`;
-        streamDiv = null;
-        const newPlan = await window.electronAPI.decomposeGoal(failContext, currentUrl);
-        if (streamDiv) streamDiv = null;
-        if (newPlan?.steps?.length > 0) {
-          plan.steps = newPlan.steps;
-          currentStepIdx = 0;
-          previousActions = [`Replanned after step stall. New plan has ${newPlan.steps.length} steps. Currently on: ${currentUrl}`];
-          const replanHtml = newPlan.steps.map(s => `<li>${s}</li>`).join('');
-          appendAiMessage(`🔄 **Replanned:**<ol style="margin:8px 0 0 16px;padding:0">${replanHtml}</ol>`);
-        } else {
-          appendAiMessage(`❌ Could not replan — giving up on this task.`);
+      if (replanCount >= MAX_REPLANS) {
+        appendAiMessage(`❌ Step ${currentStepIdx + 1} stalled after ${MAX_REPLANS} replan attempts. Stopping task.`);
+        isComplete = true;
+      } else {
+        replanCount++;
+        appendAiMessage(`⚠️ Step ${currentStepIdx + 1} stalled. Replanning (attempt ${replanCount}/${MAX_REPLANS})...`);
+        try {
+          const currentUrl = getActiveWebview()?.src || '';
+          // Always use the ORIGINAL executorGoal — never the enriched/modified one to avoid nesting
+          const failContext = `${executorGoal}\n[Note: step "${currentStep}" got stuck on ${currentUrl} after ${MAX_ACTIONS_PER_STEP} attempts. Create a fresh plan that avoids this step and reaches the goal differently.]`;
+          streamDiv = null;
+          const newPlan = await window.electronAPI.decomposeGoal(failContext, currentUrl);
+          if (streamDiv) streamDiv = null;
+          if (newPlan?.steps?.length > 0) {
+            plan.steps = newPlan.steps;
+            currentStepIdx = 0;
+            previousActions = [`Replanned after stall on "${currentStep}". Now on: ${currentUrl}. Take a different approach.`];
+            const replanHtml = newPlan.steps.map(s => `<li>${s}</li>`).join('');
+            appendAiMessage(`🔄 **Replanned:**<ol style="margin:8px 0 0 16px;padding:0">${replanHtml}</ol>`);
+          } else {
+            appendAiMessage(`❌ Could not replan — stopping.`);
+            isComplete = true;
+          }
+        } catch (_) {
+          appendAiMessage(`❌ Replan failed — stopping.`);
           isComplete = true;
         }
-      } catch (_) {
-        appendAiMessage(`❌ Replan failed — stopping.`);
-        isComplete = true;
       }
     }
   } // outer while

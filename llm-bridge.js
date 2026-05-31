@@ -356,7 +356,15 @@ function resolveResponse(fullContent, isChatMode, resolve) {
       },
     });
   } else {
-    resolve({ tool: 'reply', args: { text: fullContent.trim() || 'No action.' }, status: 'complete' });
+    // Model output couldn't be parsed as JSON — scroll the page as a safe default.
+    // This avoids the reply+complete trap that loops 7x against the observer.
+    resolve({
+      thought: 'Output unclear — scrolling to see more page content',
+      expectation: 'More page content or elements become visible',
+      status: 'running',
+      tool: 'scroll',
+      args: { targetId: null, text: 'down' },
+    });
   }
 }
 
