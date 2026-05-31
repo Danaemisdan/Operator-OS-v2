@@ -410,183 +410,146 @@ function detectFlows(elements) {
   return flows;
 }
 
-// ── Build a compact, LLM-readable page summary ────────────────────────────────
-// This is what goes INTO the agent's contextual step so it can make smart decisions
+// -- Build a compact, LLM-readable page summary --------------------------------
+// Ordered by visual layer: overlays on top first, then page content.
+// Links annotated with domain so the agent knows what stays on-site vs leaves.
 function buildPageSummary(enrichedElements, pageKnowledge) {
   if (!enrichedElements) return '';
 
-  // Priority groups — what the agent MUST know about
-  const PRIORITY_CATS = [
-    'dismiss','cookie_accept',       // Always first — blockers
-    'auth_login','auth_signup',       // Login walls
-    'search_input','search_submit',   // Search
-    'apply_button',                   // Job apply
-    'filter_open','filter_chip','filter_sort', // Filters
-    'submit',                         // Forms
-    'nav_jobs','nav_home','nav_messages','nav_profile', // Navigation
-    'load_more','pagination',         // More content
+  var lines   = [];
+  var printed = {};
+
+  // Current domain for link-origin detection
+  var currentDomain = '';
+  try { currentDomain = new URL(pageKnowledge && pageKnowledge.url || '').hostname.replace(/^www\\./, ''); } catch (_) {}
+
+  function fmt(el, indent) {
+    indent = indent || '  ';
+    var cat     = (el._exploration && el._exploration.category) || el.tag || '?';
+    var purpose = (el._exploration && el._exploration.purpose)  || '';
+    var rawText = (el.text        || '').trim();
+    var ph      = (el.placeholder || '').trim();
+    var label   = rawText ? ('"'  + rawText.substring(0, 45) + '"'): (ph ? ('[' + ph.substring(0, 35) + ']') : '');
+
+    // Domain-aware link annotation -- stops agent clicking in-page links to reach other sites
+    if (el.tag === 'a' || (el.id && el.id.indexOf('LNK') === 0)) {
+      try {
+        var href = el.href || el.hrefRaw || '';
+        if (!href || href === '#' || (href.charAt && href.charAt(0) === '#')) {
+          purpose += '  [in-page anchor, stays here]';
+        } else if (href.indexOf('javascript:') === 0) {
+          purpose += '  [JS action, no page change]';
+        } else {
+          var fullHref = href.indexOf('http') === 0 ? href : ('https://' + currentDomain + (href.charAt(0) === '/' ? '' : '/') + href);
+          var linkDomain = new URL(fullHref).hostname.replace(/^www\\./, '');
+          if (!linkDomain || linkDomain === currentDomain) {
+            purpose += '  [stays on ' + currentDomain + '  does NOT go to another site]';
+          } else {
+            purpose += '  [goes to ' + linkDomain + ']';
+          }
+        }
+      } catch (_) {
+        if (el.hrefRaw) purpose += '  [relative: ' + el.hrefRaw.substring(0, 30) + ']';
+      }
+    }
+    return indent + el.id + '  (' + cat + ')  ' + label + '  ->  ' + purpose;
+  }
+
+  // 1. Page type and domain
+  if (pageKnowledge && pageKnowledge.purpose) lines.push('PAGE TYPE: ' + pageKnowledge.purpose);
+  if (currentDomain) lines.push('SITE: ' + currentDomain);
+
+  // 2. [!] OVERLAY LAYER -- visually ON TOP. Agent MUST handle these FIRST.
+  var overlayEls = enrichedElements
+    .filter(function(e) { return e.isOverlay || e.layer === 'overlay'; })
+    .sort(function(a, b) { return (b.zIndex || 0) - (a.zIndex || 0); });
+
+  var blockerCatList = ['dismiss', 'cookie_accept', 'cookie_reject'];
+  var extraBlockers  = enrichedElements.filter(function(e) {
+    var cat = e._exploration && e._exploration.category;
+    return blockerCatList.indexOf(cat) !== -1 && !overlayEls.find(function(o) { return o.id === e.id; });
+  });
+  var allOverlay = overlayEls.concat(extraBlockers);
+
+  if (allOverlay.length > 0) {
+    lines.push('');
+    lines.push('[!] OVERLAY / POPUP -- ON TOP, handle BEFORE anything below:');
+    for (var i = 0; i < Math.min(allOverlay.length, 6); i++) {
+      lines.push(fmt(allOverlay[i]));
+      printed[allOverlay[i].id] = true;
+    }
+  }
+
+  if (pageKnowledge && pageKnowledge.blockers && pageKnowledge.blockers.has_login_wall) {
+    lines.push('[!] LOGIN WALL -- page requires authentication before any action.');
+  }
+
+  if (pageKnowledge && pageKnowledge.flows && Object.keys(pageKnowledge.flows).length > 0) {
+    lines.push('FLOWS: ' + Object.keys(pageKnowledge.flows).join(', '));
+  }
+
+  // 3. Page-level elements ordered by importance
+  var PRIORITY_CATS = [
+    'search_input', 'search_submit',
+    'auth_email_input', 'auth_password_input', 'auth_login', 'auth_signup',
+    'apply_button', 'submit',
+    'filter_open', 'filter_chip', 'filter_sort', 'filter_dropdown',
+    'ecom_add_cart', 'ecom_buy', 'ecom_confirm',
+    'follow', 'connect', 'like', 'message', 'subscribe',
+    'create_post', 'upload',
+    'nav_jobs', 'nav_home', 'nav_messages', 'nav_profile', 'nav_network', 'nav_explore',
+    'load_more', 'pagination',
+    'tab', 'more_options', 'menu_toggle',
+    'link', 'button',
   ];
 
-  const byCategory = {};
-  for (const el of enrichedElements) {
-    const cat = el._exploration?.category;
-    if (!cat || !el._exploration?.purpose) continue;
+  var byCategory = {};
+  for (var j = 0; j < enrichedElements.length; j++) {
+    var el = enrichedElements[j];
+    if (printed[el.id]) continue;
+    var cat = el._exploration && el._exploration.category;
+    if (!cat) continue;
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push(el);
   }
 
-  const lines = [];
+  lines.push('');
+  lines.push('PAGE ELEMENTS (main layer):');
 
-  // 1. Page context
-  if (pageKnowledge?.purpose) {
-    lines.push(`PAGE TYPE: ${pageKnowledge.purpose}`);
-  }
-
-  // 2. Critical blockers first
-  const blockers = [];
-  if (byCategory['cookie_accept']?.length) blockers.push(`Cookie/privacy banner present — must accept before interacting`);
-  if (byCategory['dismiss']?.length) blockers.push(`Modal/popup present — may need dismissing`);
-  if (pageKnowledge?.blockers?.has_login_wall) blockers.push(`LOGIN WALL — user must authenticate first`);
-  if (blockers.length) lines.push(`⚠ BLOCKERS: ${blockers.join('; ')}`);
-
-  // 3. Available flows
-  if (pageKnowledge?.flows && Object.keys(pageKnowledge.flows).length > 0) {
-    lines.push(`AVAILABLE FLOWS: ${Object.keys(pageKnowledge.flows).join(', ')}`);
-  }
-
-  // 4. Key elements (priority categories first, then others)
-  lines.push('INTERACTIVE ELEMENTS:');
-  const printed = new Set();
-
-  const printCat = (cat) => {
-    if (!byCategory[cat]) return;
-    for (const el of byCategory[cat].slice(0, 3)) {
-      const purpose = el._exploration?.purpose || '';
-      const label   = el.text ? ` "${el.text.substring(0, 40)}"` : (el.placeholder ? ` [${el.placeholder.substring(0, 30)}]` : '');
-      lines.push(`  ${el.id} (${cat})${label} → ${purpose}`);
-      printed.add(el.id);
+  var totalPrinted = Object.keys(printed).length;
+  for (var c = 0; c < PRIORITY_CATS.length && totalPrinted < 25; c++) {
+    var catEls = byCategory[PRIORITY_CATS[c]];
+    if (!catEls) continue;
+    for (var k = 0; k < Math.min(catEls.length, 3) && totalPrinted < 25; k++) {
+      if (printed[catEls[k].id]) continue;
+      lines.push(fmt(catEls[k]));
+      printed[catEls[k].id] = true;
+      totalPrinted++;
     }
-  };
-
-  // Priority categories
-  for (const cat of PRIORITY_CATS) printCat(cat);
-
-  // Remaining classified elements (max 12 total lines)
-  let remaining = 12 - printed.size;
-  for (const el of enrichedElements) {
-    if (remaining <= 0) break;
-    if (printed.has(el.id) || !el._exploration?.category) continue;
-    const purpose = el._exploration?.purpose || '';
-    const label   = el.text ? ` "${el.text.substring(0, 40)}"` : (el.placeholder ? ` [${el.placeholder.substring(0, 30)}]` : '');
-    lines.push(`  ${el.id} (${el._exploration.category})${label} → ${purpose}`);
-    printed.add(el.id);
-    remaining--;
   }
 
-  // 5. Unclassified interactable elements (brief list)
-  const unclassified = enrichedElements
-    .filter(e => !printed.has(e.id) && (e.text || e.placeholder) && e.id)
-    .slice(0, 6);
+  for (var r = 0; r < enrichedElements.length && totalPrinted < 32; r++) {
+    var re = enrichedElements[r];
+    if (printed[re.id] || !(re._exploration && re._exploration.category)) continue;
+    lines.push(fmt(re));
+    printed[re.id] = true;
+    totalPrinted++;
+  }
+
+  var unclassified = enrichedElements
+    .filter(function(e) { return !printed[e.id] && (e.text || e.placeholder) && e.id; })
+    .slice(0, 4);
   if (unclassified.length) {
-    lines.push('OTHER ELEMENTS:');
-    for (const el of unclassified) {
-      const label = el.text ? `"${el.text.substring(0, 40)}"` : `[${(el.placeholder||'').substring(0, 30)}]`;
-      lines.push(`  ${el.id} (${el.tag}) ${label}`);
+    lines.push('OTHER:');
+    for (var u = 0; u < unclassified.length; u++) {
+      var ue  = unclassified[u];
+      var lbl = ue.text ? ('"'  + ue.text.substring(0, 40) + '"'): ('[' + (ue.placeholder || '').substring(0, 30) + ']');
+      lines.push('  ' + ue.id + '  (' + ue.tag + ')  ' + lbl);
     }
   }
 
   return lines.join('\n');
 }
 
-// ── Main exploration function ─────────────────────────────────────────────────
-async function explorePage({ graph, domain }) {
-  if (!graph || !graph.elements) return null;
-
-  const url   = graph.url   || '';
-  const title = graph.title || '';
-
-  // 1. Classify every interactive element
-  const enrichedElements = (graph.elements || []).map(el => {
-    const purpose = classifyElementPurpose(el);
-    if (purpose) return { ...el, _exploration: purpose };
-    return el;
-  });
-
-  // 2. Classify the page itself
-  const pagePurpose = classifyPagePurpose(url, title, enrichedElements);
-
-  // 3. Detect known flows
-  const flows = detectFlows(enrichedElements);
-
-  // 4. Extract structured element groups
-  const byCategory = (cat) => enrichedElements.filter(e => e._exploration?.category === cat);
-
-  const searchInputs   = byCategory('search_input');
-  const applyButtons   = byCategory('apply_button');
-  const formInputs     = enrichedElements.filter(e => e._exploration?.category?.startsWith('input_') || e._exploration?.category === 'form_input');
-  const dismissBtns    = [...byCategory('dismiss'), ...byCategory('cookie_accept')];
-  const filterCtrls    = enrichedElements.filter(e => e._exploration?.category?.startsWith('filter_'));
-  const authBtns       = [...byCategory('auth_login'), ...byCategory('auth_signup')];
-  const submitBtns     = byCategory('submit');
-
-  // 5. Build the page knowledge record
-  const pageKnowledge = {
-    url,
-    title,
-    purpose: pagePurpose,
-    mapped_at: new Date().toISOString(),
-    element_counts: {
-      total:           enrichedElements.length,
-      classified:      enrichedElements.filter(e => e._exploration).length,
-      search_inputs:   searchInputs.length,
-      apply_buttons:   applyButtons.length,
-      form_inputs:     formInputs.length,
-      dismiss_btns:    dismissBtns.length,
-      filter_ctrls:    filterCtrls.length,
-      auth_buttons:    authBtns.length,
-    },
-    key_elements: {
-      search_inputs:   searchInputs.map(e => ({ id: e.id, text: e.text, placeholder: e.placeholder })),
-      apply_buttons:   applyButtons.map(e => ({ id: e.id, text: e.text })),
-      dismiss_buttons: dismissBtns.map(e => ({ id: e.id, text: e.text })),
-      form_inputs:     formInputs.map(e  => ({ id: e.id, placeholder: e.placeholder, text: e.text, category: e._exploration?.category })),
-      submit_buttons:  submitBtns.map(e  => ({ id: e.id, text: e.text })),
-      auth_buttons:    authBtns.map(e    => ({ id: e.id, text: e.text })),
-      filters:         filterCtrls.map(e => ({ id: e.id, text: e.text })),
-    },
-    flows,
-    blockers: {
-      has_login_wall:    authBtns.length > 0 && (url.includes('login') || url.includes('signin')),
-      has_cookie_banner: dismissBtns.some(e => /(accept|cookie|privacy|agree)/i.test(e.text || '')),
-      has_popup:         dismissBtns.length > 0,
-    },
-  };
-
-  // 6. Build compact LLM-readable summary (injected into contextualStep)
-  pageKnowledge.llm_summary = buildPageSummary(enrichedElements, pageKnowledge);
-
-  return {
-    pageKnowledge,
-    enrichedElements,
-    domain: domain || (url.startsWith('http') ? new URL(url).hostname : url.split('/')[0]),
-  };
-}
-
-// ── Behavioral Learning ───────────────────────────────────────────────────────
-function buildBehaviorRecord({ domain, url, elementId, elementText, elementCategory, action, resultUrl, resultPagePurpose, resultElementsAppeared }) {
-  return {
-    domain,
-    url_pattern: url.replace(/\/\d+\/?/g, '/:id/').replace(/[?#].*$/, ''),
-    element: { id: elementId, text: elementText, category: elementCategory },
-    action,
-    result: {
-      url_changed:    resultUrl !== url,
-      result_url:     resultUrl,
-      result_purpose: resultPagePurpose,
-      appeared:       (resultElementsAppeared || []).slice(0, 8).map(e => ({ id: e.id, text: e.text, category: e._exploration?.category })),
-    },
-    recorded_at: new Date().toISOString(),
-  };
-}
 
 module.exports = { explorePage, classifyElementPurpose, classifyPagePurpose, detectFlows, buildPageSummary, buildBehaviorRecord };

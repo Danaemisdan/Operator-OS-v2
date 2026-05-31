@@ -196,21 +196,25 @@ ${memory ? `\nPast memory:\n${memory}` : ''}
 Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-6).join(' | ')}
 
 RULES:
-- Study the page elements carefully. INP_ = input field, BTN_ = button, LNK_ = navigation link, TXT_ = visible text.
-- Read TXT_ elements to understand what page you are actually on before deciding what to do.
-- If the page shows "not found", "404", "page doesn't exist", "uh-oh", or similar error text → the URL was wrong. Use navigate to go to the site's homepage instead.
-- If a popup, modal, cookie banner, or overlay is blocking an otherwise correct page, dismiss it first.
+- Read the SITE field to know which website you are currently on before acting.
+- Read the PAGE TYPE field to understand the current page before deciding what to do.
+- If there is an [!] OVERLAY/POPUP section, handle those elements FIRST before touching anything else.
+- To reach a DIFFERENT website (e.g. from Google to LinkedIn): ALWAYS use navigate("https://site.com"). NEVER try to click LNK_ links to get to another domain — links labeled "[stays on X]" do NOT leave that site.
+- LNK_ links labeled "[stays on current-site]" are in-page navigation only. They will NOT take you to a different website.
+- INP_ = input field (type into it), BTN_ = button (click it), LNK_ = link (may stay on site — check label).
+- If the page shows "not found", "404", "page doesn't exist" → navigate to the site homepage instead.
 - If you are already on the correct site/page, do NOT navigate again — take the next action.
-- NEVER use the reply tool during task execution. reply is only for when the task is complete and you have a result to share.
-- If you already typed into a field, do NOT type again — press_enter or click submit instead.
+- If a popup/modal/cookie banner is blocking, dismiss it first.
+- NEVER use the reply tool during execution. reply is only when the task is fully complete.
+- If you already typed into a field, do NOT type again — press_enter or click submit.
 - If you already pressed enter, do NOT press enter again — read the new page first.
-- Output status="complete" ONLY when the goal is actually visible/verified on screen.
+- status="complete" ONLY when the goal result is actually visible on screen.
 - ONE tool per response. No extra text outside the JSON.
 
-Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args), scroll(args.text=up|down), reply(args.text=result_summary), ask_user(args.text=question), research(args.text=query)
+Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args), scroll(args.text=up|down), reply(args.text=result_summary), ask_user(args.text=question)
 
 Respond with ONLY this JSON:
-{"thought":"one sentence reasoning","expectation":"what should change on screen after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":"If complete, summarize what was found/done, else null"}`;
+{"thought":"one sentence reasoning","expectation":"what should change after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":"If complete, summarize what was found/done, else null"}`;
 
   const messages = isChatMode
     ? [
