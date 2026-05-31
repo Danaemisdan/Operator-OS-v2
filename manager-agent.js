@@ -46,8 +46,8 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
     `AVAILABLE SKILLS:\n` +
     `${availableSkills.length > 0 ? availableSkills.map(s => `- ${s}`).join('\n') : '- (none)'}\n\n` +
 
-    `Output format:\n` +
-    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["step 1","step 2"]}\n\n` +
+    `Output format — steps MUST be plain strings, NOT objects:\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["navigate to Google Shopping and search for water bottles under 500","report the top 3 results with names and prices"]}\n\n` +
 
     `${pageInfo}\n` +
     `Goal: "${goal}"\n\n` +
@@ -135,19 +135,36 @@ function parseSteps(full, goal) {
       if (Array.isArray(obj.steps) && obj.steps.length > 0) {
         const steps = obj.steps
           .map(s => {
+            // String step — use as-is
+            if (typeof s === 'string') return s;
             if (s && typeof s === 'object') {
+              // Handle {"step N": {details}} format — unwrap the inner object
+              const innerVals = Object.values(s);
+              if (innerVals.length === 1 && innerVals[0] && typeof innerVals[0] === 'object') {
+                const inner = innerVals[0];
+                // Reconstruct as readable text from known fields
+                const text = inner.query || inner.report || inner.action || inner.description ||
+                  inner.step || inner.instruction || inner.text || inner.url || inner.target || '';
+                if (text) return String(text);
+                // Last resort: join all string values of the inner object
+                const strVals = Object.values(inner).filter(v => typeof v === 'string' && v.length > 2);
+                if (strVals.length > 0) return strVals[0]; // use first meaningful string
+              }
+              // Handle flat object step: try known fields
               const a = s.action || s.type || '';
               const detail = s.url || s.text || s.query || s.target ||
                 s.searchTerm || s.searchQuery || s.term || s.value ||
-                s.description || s.step || s.instruction || '';
+                s.description || s.step || s.instruction || s.report || '';
               if (a && detail) return `${a} ${detail}`.trim();
-              if (detail) return detail;
-              if (a) return a;
+              if (detail) return String(detail);
+              if (a) return String(a);
+              // Absolute last resort — join any string values
               const vals = Object.values(s).filter(v => typeof v === 'string' && v.length > 2);
-              return vals.length > 0 ? vals.join(' ') : JSON.stringify(s);
+              return vals.length > 0 ? vals.join(' ') : null;
             }
             return String(s);
           })
+          .filter(Boolean)
           .map(s => s
             .replace(/^(\d+[.)]\s*)/, '')
             .replace(/^(step\s*\d+\s*[:.)\\-]\s*)/i, '')

@@ -228,13 +228,13 @@ ${(() => { try { const keys = memoryStore.listVariableKeys(); return keys.length
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-2).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
-{"tool":"navigate","args":{"text":"https://site.com"},"status":"running"}
-{"tool":"click","args":{"targetId":"BTN_001"},"status":"running"}
-{"tool":"type","args":{"targetId":"INP_001","text":"search text"},"status":"running"}
+{"tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
+{"tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
+{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type, NOT this placeholder>"},"status":"running"}
 {"tool":"press_enter","args":{},"status":"running"}
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
-{"tool":"ask_user","args":{"text":"question"},"status":"running"}
-{"tool":"reply","args":{"text":"answer"},"status":"complete"}
+{"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
+{"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
 
 RULES:
 1. Output ONLY the JSON. Nothing before or after.
