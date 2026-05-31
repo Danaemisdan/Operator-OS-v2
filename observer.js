@@ -143,11 +143,11 @@ function parseObserverOutput(full, lastAction) {
 function fallbackObservation(lastAction) {
   return {
     state: 'unknown',
-    what_changed: `Action "${lastAction || 'unknown'}" was taken`,
-    action_succeeded: blockers.length === 0,
-    blockers,
-    confidence: 0.5,
-    next_hint: blockers.length > 0 ? `Resolve blocker: ${blockers[0]}` : 'Continue with next step',
+    what_changed: `Action "${lastAction || 'unknown'}" was taken — observer timed out`,
+    action_succeeded: false,
+    blockers: [],
+    confidence: 0.3,
+    next_hint: 'Observer failed to respond. Try reading the current page state and continuing.',
   };
 }
 

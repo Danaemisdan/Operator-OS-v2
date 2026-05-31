@@ -641,6 +641,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
     const currentStep = plan.steps[currentStepIdx];
     tpp.setStep(currentStepIdx);
     let actionCount = 0;
+    let lastActionFingerprint = '';   // for loop detection
+    let consecutiveSameAction = 0;   // how many times in a row the same action fired with no effect
 
     // ── Already-on-page check ──────────────────────────────────────────────
     // If this step says "open / navigate / go to X" and the browser is
@@ -1009,15 +1011,38 @@ Return ONLY a JSON array of question strings, nothing else.`;
             action: 'keyboard_shortcut',
             payload: { modifiers: [], keyCode: 'Return' }
           });
-          await waitForPageLoad(wv, 5000);
+          await waitForPageLoad(wv, 6000);
           await refreshActiveGraph(wv);
-          previousActions.push(`Expectation: "${expectation}". Outcome: Pressed Enter — URL is now ${wv.src}`);
+          const urlAfterEnter = wv.src || '';
+          previousActions.push(
+            `Pressed Enter. Page is now: ${urlAfterEnter}. ` +
+            `DO NOT press Enter again — it was already submitted. ` +
+            `READ what is currently on screen and decide the next action based on that.`
+          );
 
         } else if (action === 'reply') {
           appendAiMessage(`🗣️ ${args.text || ''}`);
           previousActions.push('replied to user');
         } else {
           previousActions.push(`${action || 'unknown'} — unrecognised action`);
+        }
+
+        // ── Loop detection: same action + target + URL, 3 times in a row ────
+        // Doesn't hardcode what to do — just gives the LLM strong evidence it's stuck
+        const fingerprint = `${action}::${args?.targetId || args?.text?.slice(0,20) || ''}::${wv.src}`;
+        if (fingerprint === lastActionFingerprint) {
+          consecutiveSameAction++;
+          if (consecutiveSameAction >= 2) {
+            appendAiMessage(`⚠️ Same action repeated ${consecutiveSameAction + 1}x with no change.`);
+            previousActions.push(
+              `STUCK: The action "${action}" on "${args?.targetId || args?.text?.slice(0,30)}" ` +
+              `has been attempted ${consecutiveSameAction + 1} times in a row and the page has not changed. ` +
+              `This approach is not working. Look at the current page elements and try a completely different element or approach.`
+            );
+          }
+        } else {
+          lastActionFingerprint = fingerprint;
+          consecutiveSameAction = 0;
         }
 
         appendAiMessage(msg);
@@ -1030,9 +1055,28 @@ Return ONLY a JSON array of question strings, nothing else.`;
     } // inner
 
     if (actionCount >= MAX_ACTIONS_PER_STEP && !isComplete) {
-      appendAiMessage(`⚠️ Step ${currentStepIdx + 1} hit ${MAX_ACTIONS_PER_STEP}-action limit. Moving on.`);
-      currentStepIdx++;
-      previousActions = [];
+      // Don't just give up — replan from current reality
+      appendAiMessage(`⚠️ Step ${currentStepIdx + 1} stalled. Replanning from current page...`);
+      try {
+        const currentUrl = getActiveWebview()?.src || '';
+        const failContext = `${enrichedGoal}\n[Step "${currentStep}" failed after ${MAX_ACTIONS_PER_STEP} attempts on ${currentUrl}. Replan the remaining steps from here.]`;
+        streamDiv = null;
+        const newPlan = await window.electronAPI.decomposeGoal(failContext, currentUrl);
+        if (streamDiv) streamDiv = null;
+        if (newPlan?.steps?.length > 0) {
+          plan.steps = newPlan.steps;
+          currentStepIdx = 0;
+          previousActions = [`Replanned after step stall. New plan has ${newPlan.steps.length} steps. Currently on: ${currentUrl}`];
+          const replanHtml = newPlan.steps.map(s => `<li>${s}</li>`).join('');
+          appendAiMessage(`🔄 **Replanned:**<ol style="margin:8px 0 0 16px;padding:0">${replanHtml}</ol>`);
+        } else {
+          appendAiMessage(`❌ Could not replan — giving up on this task.`);
+          isComplete = true;
+        }
+      } catch (_) {
+        appendAiMessage(`❌ Replan failed — stopping.`);
+        isComplete = true;
+      }
     }
   } // outer while
 

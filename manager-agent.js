@@ -21,8 +21,11 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
     `   NEVER guess or construct deep URL paths like /tech/laptops/ or /search?q=... — you do not know what paths exist on any site.\n` +
     `   Let the site's own search/navigation do the work once you arrive.\n` +
     `2. When no specific site is named, navigate to a relevant search engine and search there.\n` +
-    `3. Step descriptions should be plain English actions: "navigate to X", "search for Y", "click the search result".\n` +
-    `   Never put raw URLs in step text — navigate steps just say the site name.\n\n` +
+    `3. Steps must be CONCRETE and executable — not summaries.\n` +
+    `   BAD: "search for shoes" — the executor doesn't know where or what to type.\n` +
+    `   GOOD: "type 'cool shoes for men' into the search box and submit" or "click the search box and type 'shoes'"\n` +
+    `   BAD: "click the search result" — which one? Be specific about what to look for.\n` +
+    `   GOOD: "click the first product listing that matches the goal"\n\n` +
     `CLARIFYING QUESTIONS — before planning, decide if critical info is missing:\n` +
     `Ask ONLY when the missing info changes which site to visit or what to type into a search.\n` +
     `Examples worth asking: budget range for shopping, job role or location for job search, travel dates for booking.\n` +
@@ -51,7 +54,7 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
       { role: 'system', content: 'You are a JSON-only planning agent. Never write prose. Always respond with only a raw JSON object.' },
       { role: 'user', content: prompt }
     ],
-    temperature: 0.05,
+    temperature: 0.15,
     max_tokens: 400,
     stream: true,
   });
