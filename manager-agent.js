@@ -16,13 +16,13 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
   const prompt =
     `You are a task planning agent. Break the user's goal into 2-5 clear, sequential browser steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
-    `STEPS FORMAT RULES (critical):\n` +
+    `STEPS FORMAT RULES:\n` +
     `- Every step MUST be a plain English sentence string. NEVER put a JSON object or raw URL inside steps[].\n` +
-    `- Navigate steps: say the site name only — "navigate to Instagram" NOT "navigate https://instagram.com"\n` +
-    `- Never construct deep URLs — let the site's own search/nav do the work once you arrive.\n` +
-    `- Steps must be CONCRETE: say what to type or what to click specifically.\n` +
-    `  BAD: "search for shoes" | GOOD: "type 'cool running shoes' into the search box and press enter"\n` +
-    `  BAD: "click the result" | GOOD: "click the first matching result in the list"\n\n` +
+    `- Navigate steps: say the site name only — "navigate to Instagram", "navigate to Amazon". Never include raw URLs.\n` +
+    `- Never construct deep URL paths — let the site's own search/nav do the work once you arrive.\n` +
+    `- Steps describe WHAT to do, not HOW to do it in the browser. The executor figures out the HOW.\n` +
+    `  GOOD: "navigate to Amazon", "search for Sony WH-1000XM5", "click the first product result"\n` +
+    `  BAD: "type amazon.com into the address bar", "type into the search box", "navigate https://..."\n\n` +
     `CLARIFYING QUESTIONS — if the goal is ambiguous, ask before planning:\n` +
     `Ask when missing info directly changes what site to use, what to search for, or who/what to target.\n` +
     `Examples REQUIRING questions:\n` +

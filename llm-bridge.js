@@ -198,24 +198,21 @@ ${memory ? `\nPast memory:\n${memory}` : ''}
 Actions so far: ${previousActions.length === 0 ? 'None' : previousActions.slice(-6).join(' | ')}
 
 RULES:
-- You control a REAL browser. Your job is to take ONE concrete action per turn.
-- Study the page elements: INP_ = input, BTN_ = button, LNK_ = link, TXT_ = visible text.
-- Read TXT_ elements to understand what page you are on BEFORE deciding what to do.
-- NEVER use reply to explain what you see or describe the page. reply is FORBIDDEN during execution.
-- NEVER output reasoning or analysis as text. Only output the JSON object.
-- If the page shows a 404 or error → navigate to the site homepage instead.
-- If a modal/overlay with a CLOSE or DISMISS button is blocking the page → click that button.
-- Do NOT sign in unless the user's goal explicitly requires authentication.
-- If you already typed into a field, DO NOT type again — press_enter or click submit.
-- If you already pressed enter, DO NOT press enter again — read the new page first.
-- Output status="complete" ONLY when the goal result is actually visible on screen.
-- If you need info the user didn't provide, use ask_user (max once per task).
+- Study the page elements carefully. INP_ = input field, BTN_ = button, LNK_ = navigation link, TXT_ = visible text.
+- Read TXT_ elements to understand what page you are actually on before deciding what to do.
+- If the page shows "not found", "404", "page doesn't exist", "uh-oh", or similar error text → the URL was wrong. Use navigate to go to the site's homepage instead.
+- If a popup, modal, cookie banner, or overlay is blocking an otherwise correct page, dismiss it first.
+- If you are already on the correct site/page, do NOT navigate again — take the next action.
+- NEVER use the reply tool during task execution. reply is only for when the task is complete and you have a result to share.
+- If you already typed into a field, do NOT type again — press_enter or click submit instead.
+- If you already pressed enter, do NOT press enter again — read the new page first.
+- Output status="complete" ONLY when the goal is actually visible/verified on screen.
+- ONE tool per response. No extra text outside the JSON.
 
-Available actions: navigate(text=URL), click(targetId=ID), type(targetId=ID, text=value), press_enter, scroll(text=up|down), ask_user(text=question)
-When status=complete you may add extracted_data summarizing what was found.
+Tools: navigate(args.text=URL), click(args.targetId=ID), type(args.targetId=ID,args.text=text), press_enter(no args), scroll(args.text=up|down), reply(args.text=result_summary), ask_user(args.text=question), research(args.text=query)
 
-Respond with ONLY this JSON — no other text:
-{"thought":"one sentence: what I see and what I will do","expectation":"what should change after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":null}`;
+Respond with ONLY this JSON:
+{"thought":"one sentence reasoning","expectation":"what should change on screen after this action","status":"running|complete","tool":"toolname","args":{"targetId":null,"text":null},"extracted_data":"If complete, summarize what was found/done, else null"}`;
 
   const messages = isChatMode
     ? [

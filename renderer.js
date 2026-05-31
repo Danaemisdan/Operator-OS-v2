@@ -688,6 +688,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
       actionCount++;
       try {
         const wv = getActiveWebview();
+        if (!wv) { await delay(1000); continue; } // webview not ready yet
         const urlBefore = wv.src || '';
 
         // ── ALWAYS refresh DOM before asking LLM what to do ──────────────
@@ -1039,7 +1040,18 @@ Return ONLY a JSON array of question strings, nothing else.`;
           appendAiMessage(`🗣️ ${args.text || ''}`);
           previousActions.push('replied to user');
         } else {
-          previousActions.push(`${action || 'unknown'} — unrecognised action`);
+          // Unknown tool — if it has a text arg that looks like a URL, treat as navigate
+          const unknownText = args?.text || '';
+          if (unknownText.includes('.') && !unknownText.includes(' ')) {
+            appendAiMessage(`⚠️ Unknown tool "${action}" — treating as navigate`);
+            await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'navigate', payload: { url: unknownText } });
+            await waitForPageLoad(wv, 6000);
+            await refreshActiveGraph(wv);
+            previousActions.push(`Navigated to ${unknownText} (recovered from unknown tool "${action}")`);
+          } else {
+            appendAiMessage(`⚠️ Unrecognised action "${action}" — skipping`);
+            previousActions.push(`${action || 'unknown'} — unrecognised, skipped. Use only: navigate, click, type, press_enter, scroll, reply, ask_user`);
+          }
         }
 
         // ── Loop detection: same action + target + URL, 3 times in a row ────
