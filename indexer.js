@@ -226,7 +226,15 @@
       label.style.left = `${Math.max(0, rect.left + scrollLeft - 4)}px`;
       fragment.appendChild(label);
       
-      const text = (node.innerText || node.value || node.placeholder || node.getAttribute('aria-label') || node.alt || '').trim();
+      // Smart label extraction — prioritises accessible label over raw innerText
+      // so icon-only buttons and SVG-icon buttons get proper names
+      const ariaLbl = node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '';
+      const titleLbl = node.getAttribute('title') || node.getAttribute('data-tooltip') || node.getAttribute('data-title') || '';
+      const svgTitle = (() => { try { return node.querySelector('title')?.textContent || ''; } catch(_){return '';} })();
+      const innerTxt = (node.innerText || '').trim().replace(/\n/g,' ').replace(/\s+/g,' ').substring(0, 80);
+      const altTxt   = node.alt || '';
+      // Prefer: aria-label > innerText (if short enough) > title > SVG title > placeholder > alt
+      const text = (ariaLbl || (innerTxt.length < 80 && innerTxt) || titleLbl || svgTitle || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
       let parent = node.parentElement;
       let parentContext = '';
       let depth = 0;
@@ -278,13 +286,22 @@
     // Atomic update to prevent flashing (using replaceChildren to bypass TrustedHTML CSP)
     overlayContainer.replaceChildren();
     overlayContainer.appendChild(fragment);
-    
-    const graph = {
-      url: window.location.href,
-      title: document.title,
-      elementCount: elements.length,
-      elements: elements
-    };
+      
+      // Sort: overlay elements first (they must be dismissed first),
+      // then descending z-index (higher layers visible on top),
+      // then ascending y position (top-to-bottom reading order)
+      elements.sort((a, b) => {
+        if (a.isOverlay !== b.isOverlay) return a.isOverlay ? -1 : 1;
+        if (a.zIndex !== b.zIndex) return b.zIndex - a.zIndex;
+        return a.position.y - b.position.y;
+      });
+
+      const graph = {
+        url: window.location.href,
+        title: document.title,
+        elementCount: elements.length,
+        elements: elements
+      };
     
     window.postMessage({ type: 'ui-update', payload: JSON.stringify(graph) }, '*');
     

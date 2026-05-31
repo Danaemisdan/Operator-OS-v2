@@ -178,15 +178,19 @@ ${pageSummary}`;
       );
 
       // ── Overlay / popup detection ────────────────────────────────────────
-      // Dismiss-labelled elements signal a blocking popup that must be handled first
-      const overlayEls = interactiveEls.filter(e => DISMISS_RE.test((e.text || e.placeholder || '').trim()));
+      // Primary: use isOverlay flag from indexer (z-index + fixed/absolute position)
+      // Secondary: DISMISS_RE text heuristic for overlays missing proper z-index
+      const overlayEls = interactiveEls.filter(e =>
+        e.isOverlay || DISMISS_RE.test((e.text || e.placeholder || '').trim())
+      );
       const overlayBlock = overlayEls.length > 0
         ? `\n⚠️ POPUP/OVERLAY IS BLOCKING THE PAGE — dismiss it FIRST before any other action:\n` +
           overlayEls.map(e => `  [${e.id}] "${e.text || e.placeholder}" — closes/dismisses this overlay`).join('\n') + '\n'
         : '';
 
       // ── Build element list with state + header zone hints ─────────────────
-      const elLines = interactiveEls.slice(0, 15).map(e => {
+      // No cap on count — model needs to see the full action space
+      const elLines = interactiveEls.slice(0, 30).map(e => {
         const label = (e.text || e.placeholder || '').substring(0, 50);
         // In-memory state — typed value or clicked flag injected by renderer
         const st = e._state;
@@ -217,26 +221,30 @@ ${elLines}`;
     ? (hasChatPageContext
         ? `You are Operator, a browser AI. Answer ONLY from the page context below — never guess or hallucinate page content.\nBe concise.${pageContext}`
         : `You are Operator, a browser AI assistant. Be concise and conversational.`)
-    : `You are a browser control agent. Your job is to take ONE action to move toward the goal.
-${pageContext}
-${memory ? `\nMemory: ${memory}` : ''}
-Actions taken: ${previousActions.length === 0 ? 'None yet' : previousActions.slice(-4).join(' | ')}
+    : `You are a browser control agent. Take exactly ONE action to move toward the goal.
 
-Tools — pick ONE and respond with its JSON:
-- navigate to a URL:  {"tool":"navigate","args":{"text":"https://example.com"},"status":"running"}
-- click an element:   {"tool":"click","args":{"targetId":"BTN_001"},"status":"running"}
-- type into a field:  {"tool":"type","args":{"targetId":"INP_001","text":"your text"},"status":"running"}
-- press Enter/submit: {"tool":"press_enter","args":{},"status":"running"}
-- scroll the page:    {"tool":"scroll","args":{"text":"down"},"status":"running"}
-- report to user (ONLY when fully done): {"tool":"reply","args":{"text":"result here"},"status":"complete"}
+SITUATION:
+${pageContext}
+${memory ? `\nMEMORY: ${memory}` : ''}
+RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-2).join(' │ ')}
+
+AVAILABLE ACTIONS — respond with exactly one JSON object:
+{"tool":"navigate","args":{"text":"https://site.com"},"status":"running"}
+{"tool":"click","args":{"targetId":"BTN_001"},"status":"running"}
+{"tool":"type","args":{"targetId":"INP_001","text":"search text"},"status":"running"}
+{"tool":"press_enter","args":{},"status":"running"}
+{"tool":"scroll","args":{"text":"down"},"status":"running"}
+{"tool":"ask_user","args":{"text":"question"},"status":"running"}
+{"tool":"reply","args":{"text":"answer"},"status":"complete"}
 
 RULES:
-- Output ONLY the JSON. No explanation before or after.
-- To go to a different site: navigate with full https:// URL.
-- If there is a popup or overlay: dismiss it first (click its close/dismiss button).
-- On a search results page with products: click a result to go to the product page — do NOT reply yet.
-- NEVER reply unless the answer/data is actually on screen.
-- If you already typed: press_enter next. If you already pressed enter: read the new page.`;
+1. Output ONLY the JSON. Nothing before or after.
+2. OVERLAY visible? Dismiss it first — click its close/done button before anything else.
+3. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
+4. Element marked ⚠️[header control]? Skip it — not a content element.
+5. On search results? Click a result to open it — do NOT reply yet.
+6. Only use reply when the answer is actually visible on screen.
+7. If you typed + pressed enter and the page changed: read the new page context.`;
 
   const messages = isChatMode
     ? [
