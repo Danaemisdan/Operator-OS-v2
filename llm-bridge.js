@@ -150,7 +150,7 @@ function analyzeUIWithLLM(graph) {
 // instead of raw elements when available. Shorter prompt = faster inference.
 async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '') {
   // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
-  const isChatMode = !graph.url && (!graph.elements || graph.elements.length === 0);
+  const isChatMode = !graph.elements || graph.elements.length === 0;
 
   // Build page context — prefer pre-computed heuristic summary (instant, compact)
   // over rebuilding from raw elements (slow, noisy)
