@@ -4,104 +4,142 @@ const http = require('http');
 // ─── UI Analysis (heuristic, no LLM needed) ───────────────────────────────────
 function analyzeUIWithLLM(graph) {
   const url = (graph.url || '').toLowerCase();
-  const textStr = (graph.elements || []).map(e => (e.text || '').toLowerCase()).join(' ');
+  const els = graph.elements || [];
 
-  let pattern = 'Generic Web Page';
-  if (url.includes('login') || url.includes('signin') || url.includes('auth') || url.includes('accounts.'))
-    pattern = 'Authentication / Sign-in Portal';
-  else if (textStr.includes('inbox') || textStr.includes('compose') || url.includes('mail'))
-    pattern = 'Email / Messaging Application';
-  else if (textStr.includes('add to cart') || textStr.includes('checkout') || url.includes('store') || url.includes('shop'))
-    pattern = 'E-Commerce / Storefront';
-  else if (textStr.includes('feed') || textStr.includes('followers') || url.includes('twitter') || url.includes('instagram') || url.includes('linkedin'))
-    pattern = 'Social Media Feed';
-  else if (url.includes('github'))
-    pattern = 'Code Repository';
-  else if (url.includes('youtube'))
-    pattern = 'Video Platform';
-  else if (url.includes('google.com/search') || url.includes('duckduckgo') || url.includes('bing.com'))
-    pattern = 'Search Results Page';
-  else if (url.includes('google.com') && !url.includes('accounts.'))
-    pattern = 'Search Engine Homepage';
-  else if (textStr.includes('dashboard') || textStr.includes('analytics'))
-    pattern = 'Application Dashboard';
+  // ── Page pattern: multi-signal convergence, not single URL checks ──────────
+  // Each signal votes, highest total wins. No hardcoded site names.
+  const allText = els.map(e => (e.text || '').toLowerCase()).join(' ');
+  const urlPath = url.replace(/https?:\/\/[^/]+/, '');
 
+  const patternVotes = {
+    'Authentication / Sign-in Page':     0,
+    'E-Commerce / Shopping':             0,
+    'Search Results Page':               0,
+    'Search Engine Homepage':            0,
+    'Video Platform':                    0,
+    'Social Media / Feed':               0,
+    'Code Repository':                   0,
+    'Email / Messaging':                 0,
+    'Application Dashboard':             0,
+    'News / Article Page':               0,
+    'Generic Web Page':                  1, // baseline
+  };
+
+  // URL path signals
+  if (/\/(login|signin|sign-in|auth|oauth|sso|account\/login)/.test(urlPath)) patternVotes['Authentication / Sign-in Page'] += 3;
+  if (/\/(search|results|find|query|s\?)/.test(urlPath)) patternVotes['Search Results Page'] += 2;
+  if (/\/(watch|video|player|videos)/.test(urlPath)) patternVotes['Video Platform'] += 2;
+  if (/\/(cart|checkout|order|buy|purchase)/.test(urlPath)) patternVotes['E-Commerce / Shopping'] += 2;
+  if (/\/(inbox|mail|compose|message|chat)/.test(urlPath)) patternVotes['Email / Messaging'] += 2;
+  if (/\/(dashboard|analytics|admin|console|panel)/.test(urlPath)) patternVotes['Application Dashboard'] += 2;
+  if (/\/(repo|commit|pull|issues|blob)/.test(urlPath)) patternVotes['Code Repository'] += 2;
+  if (/\/(feed|timeline|post|profile|followers)/.test(urlPath)) patternVotes['Social Media / Feed'] += 2;
+  if (/\/(article|news|story|post|blog)/.test(urlPath)) patternVotes['News / Article Page'] += 2;
+  if (/^\/?$|^\/\?/.test(urlPath)) patternVotes['Search Engine Homepage'] += 1; // root path
+
+  // Interactive element signals
+  const hasPasswordInput = els.some(e => e.inputType === 'password');
+  const hasSearchInput   = els.some(e => e.id?.startsWith('INP') && ((e.placeholder || '').toLowerCase().includes('search') || (e.name || '') === 'q'));
+  const hasVideoPlayer   = els.some(e => e.tag === 'video');
+  const hasPriceText     = allText.match(/\$[\d,]+|\d+\.\d{2}|add to cart/);
+  const hasCodeText      = allText.includes('commit') || allText.includes('pull request') || allText.includes('repository');
+
+  if (hasPasswordInput)  { patternVotes['Authentication / Sign-in Page'] += 2; }
+  if (hasSearchInput && urlPath === '' || urlPath === '/') patternVotes['Search Engine Homepage'] += 2;
+  if (hasSearchInput && urlPath.includes('search')) patternVotes['Search Results Page'] += 2;
+  if (hasVideoPlayer)    { patternVotes['Video Platform'] += 3; }
+  if (hasPriceText)      { patternVotes['E-Commerce / Shopping'] += 2; }
+  if (hasCodeText)       { patternVotes['Code Repository'] += 2; }
+
+  const pattern = Object.entries(patternVotes).sort((a, b) => b[1] - a[1])[0][0];
+
+  // ── Per-element labels: derive from ALL available context signals ──────────
+  // No predetermined keyword lists — signals from the element itself.
   const predictions = {};
-  (graph.elements || []).forEach(el => {
-    const t = (el.text || '').toLowerCase().trim();
-    const rawText = (el.text || '').trim();
-    const href = (el.href || '').toLowerCase();
-    const role = (el.role || '').toLowerCase();
-    const placeholder = (el.placeholder || '').toLowerCase();
+
+  els.forEach(el => {
     if (!el.id) return;
 
-    // ── Inputs: describe by placeholder or role ─────────────────────
+    // Gather all text signals from the element
+    const labelText   = (el.text || '').trim();
+    const placeholder = (el.placeholder || '').trim();
+    const ariaLabel   = (el.ariaLabel || el['aria-label'] || '').trim();
+    const nameAttr    = (el.name || '').trim();
+    const hrefPath    = (el.href || '').replace(/https?:\/\/[^/]+/, '').toLowerCase();
+    const inputType   = (el.inputType || '').toLowerCase();
+    const role        = (el.role || '').toLowerCase();
+    const tag         = (el.tag || '').toLowerCase();
+
+    // Primary descriptor: best human-readable signal available
+    const primaryLabel = ariaLabel || placeholder || labelText || nameAttr;
+
     if (el.id.startsWith('INP')) {
-      const label = placeholder || t || 'text';
-      if (label.includes('search') || role.includes('search') || href.includes('search'))
-        predictions[el.id] = `Search box — type a query here to search the page`;
-      else if (label.includes('email') || label.includes('mail'))
-        predictions[el.id] = `Email address input field`;
-      else if (label.includes('password') || label.includes('pass'))
-        predictions[el.id] = `Password input field`;
-      else if (label.includes('user') || label.includes('username') || label.includes('name'))
-        predictions[el.id] = `Username / name input field`;
-      else
-        predictions[el.id] = `Text input field for: "${label.substring(0, 40)}"`;
+      // Input: describe what it's for, not what it IS
+      if (inputType === 'password') {
+        predictions[el.id] = `Password field${ariaLabel ? ` — ${ariaLabel}` : ''}`;
+      } else if (inputType === 'email') {
+        predictions[el.id] = `Email address field${ariaLabel ? ` — ${ariaLabel}` : ''}`;
+      } else if (inputType === 'search' || nameAttr === 'q' || role === 'search' || (placeholder || '').toLowerCase().includes('search')) {
+        predictions[el.id] = `Search box${placeholder ? ` — "${placeholder}"` : ''}`;
+      } else if (inputType === 'checkbox') {
+        predictions[el.id] = `Checkbox: ${primaryLabel || 'toggle option'}`;
+      } else if (inputType === 'radio') {
+        predictions[el.id] = `Radio button: ${primaryLabel || 'select option'}`;
+      } else {
+        predictions[el.id] = primaryLabel
+          ? `Text field: "${primaryLabel.substring(0, 50)}"`
+          : `Text input field`;
+      }
       return;
     }
 
-    // ── Common action verbs on buttons / links ───────────────────────
-    if (t.includes('sign in') || t.includes('log in') || t.includes('login'))
-      return void (predictions[el.id] = 'Opens sign-in / login authentication flow');
-    if (t.includes('sign up') || t.includes('register') || t.includes('create account'))
-      return void (predictions[el.id] = 'Opens account registration / sign-up flow');
-    if (t.includes('sign out') || t.includes('log out') || t.includes('logout'))
-      return void (predictions[el.id] = 'Logs the user out of their account');
-    if (t.includes('submit') || t.includes('send') || t.includes('confirm') || t.includes('done'))
-      return void (predictions[el.id] = `Submits or confirms: "${rawText.substring(0, 40)}"`);
-    if (t.includes('next') || t.includes('continue'))
-      return void (predictions[el.id] = 'Proceeds to the next step in the flow');
-    if (t.includes('back') || t.includes('previous') || t.includes('cancel'))
-      return void (predictions[el.id] = 'Goes back or cancels the current action');
-    if (t.includes('search'))
-      return void (predictions[el.id] = 'Submits the search query');
-    if (t.includes('add to cart') || t.includes('buy') || t.includes('purchase') || t.includes('checkout'))
-      return void (predictions[el.id] = `E-commerce action: "${rawText.substring(0, 40)}"`);
-    if (t.includes('connect') || t.includes('follow') || t.includes('message'))
-      return void (predictions[el.id] = `Social action: "${rawText.substring(0, 40)}"`);
-    if (t.includes('close') || t.includes('dismiss') || t.includes('skip') || t.includes('no thanks'))
-      return void (predictions[el.id] = `Closes or dismisses a modal/popup: "${rawText.substring(0, 40)}"`);
-    if (t.includes('allow') || t.includes('accept') || t.includes('agree') || t.includes('ok'))
-      return void (predictions[el.id] = `Accepts a prompt or cookie/permission dialog`);
-
-    // ── Links: use href to describe destination ──────────────────────
-    if (el.id.startsWith('LNK')) {
-      if (href.includes('mail') || href.includes('gmail'))
-        predictions[el.id] = `Navigates to Gmail / email inbox`;
-      else if (href.includes('cart') || href.includes('checkout'))
-        predictions[el.id] = `Navigates to shopping cart or checkout page`;
-      else if (href.includes('account') || href.includes('profile') || href.includes('settings'))
-        predictions[el.id] = `Navigates to account, profile, or settings page`;
-      else if (href.includes('search'))
-        predictions[el.id] = `Navigates to search results page`;
-      else if (rawText.length > 1 && rawText.length < 60)
-        predictions[el.id] = `Navigates to the "${rawText.substring(0, 40)}" section or page`;
-      else
-        predictions[el.id] = `Navigation link`;
-      return;
-    }
-
-    // ── Buttons with meaningful text ─────────────────────────────────
     if (el.id.startsWith('BTN')) {
-      if (rawText.length > 1 && rawText.length < 60)
-        predictions[el.id] = `Triggers the "${rawText.substring(0, 40)}" action`;
-      else
-        predictions[el.id] = `Interactive button`;
+      // Button: describe what clicking it DOES, derived from its label + context
+      if (!labelText && !ariaLabel) {
+        // Icon-only button — use context clues
+        if (hrefPath.includes('close') || hrefPath.includes('dismiss')) {
+          predictions[el.id] = `Close / dismiss button`;
+        } else {
+          predictions[el.id] = `Unlabelled button (icon only)`;
+        }
+        return;
+      }
+      // Use the label directly — it's the most honest description
+      // Add context about what kind of action it is
+      const lc = primaryLabel.toLowerCase();
+      if (inputType === 'submit' || lc === 'submit' || lc === 'send' || lc === 'go' || lc === 'search') {
+        predictions[el.id] = `Submit / confirm button: "${labelText}"`;
+      } else if (lc.includes('close') || lc.includes('dismiss') || lc === '✕' || lc === 'x' || lc === '×') {
+        predictions[el.id] = `Close/dismiss: "${labelText}" — closes this modal or overlay`;
+      } else if (lc.includes('sign in') || lc.includes('log in')) {
+        predictions[el.id] = `Authentication button: "${labelText}" — starts login flow`;
+      } else if (lc.includes('sign up') || lc.includes('register') || lc.includes('join')) {
+        predictions[el.id] = `Registration button: "${labelText}" — creates new account`;
+      } else if (lc.includes('continue with') || lc.includes('sign in with')) {
+        predictions[el.id] = `OAuth login: "${labelText}" — authenticates via third party`;
+      } else {
+        predictions[el.id] = `Button: "${primaryLabel.substring(0, 50)}"`;
+      }
       return;
     }
 
-    predictions[el.id] = `Interactive element`;
+    if (el.id.startsWith('LNK')) {
+      // Link: describe destination, derived from text + href path
+      if (primaryLabel.length > 0 && primaryLabel.length < 80) {
+        const dest = hrefPath.split('/').filter(Boolean)[0] || '';
+        predictions[el.id] = dest
+          ? `Link to "${primaryLabel}" (${dest} section)`
+          : `Link: "${primaryLabel.substring(0, 60)}"`;
+      } else if (hrefPath) {
+        const segment = hrefPath.split('/').filter(Boolean)[0] || hrefPath;
+        predictions[el.id] = `Link to /${segment}`;
+      } else {
+        predictions[el.id] = `Navigation link`;
+      }
+      return;
+    }
+
+    predictions[el.id] = primaryLabel ? `Element: "${primaryLabel.substring(0, 40)}"` : `Interactive element`;
   });
 
   return Promise.resolve({ semanticPattern: pattern, predictions });

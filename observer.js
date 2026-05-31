@@ -100,18 +100,18 @@ Answer ONLY with this JSON:
           try { const tok = JSON.parse(p).choices?.[0]?.delta?.content; if (tok) full += tok; } catch (_) {}
         }
       });
-      res.on('end', () => resolve(parseObserverOutput(full, blockers, lastAction)));
-      res.on('error', () => resolve(fallbackObservation(blockers, lastAction)));
+      res.on('end', () => resolve(parseObserverOutput(full, lastAction)));
+      res.on('error', () => resolve(fallbackObservation(lastAction)));
     });
 
-    req.on('timeout', () => { req.destroy(); resolve(fallbackObservation(blockers, lastAction)); });
-    req.on('error', () => resolve(fallbackObservation(blockers, lastAction)));
+    req.on('timeout', () => { req.destroy(); resolve(fallbackObservation(lastAction)); });
+    req.on('error', () => resolve(fallbackObservation(lastAction)));
     req.write(body);
     req.end();
   });
 }
 
-function parseObserverOutput(full, blockers, lastAction) {
+function parseObserverOutput(full, lastAction) {
   // Try all JSON objects in the response
   const candidates = [];
   let depth = 0, start = -1;
@@ -130,17 +130,17 @@ function parseObserverOutput(full, blockers, lastAction) {
           state: obj.state || 'unknown',
           what_changed: obj.what_changed || 'Unknown',
           action_succeeded: obj.action_succeeded !== false,
-          blockers: obj.blockers || blockers,
+          blockers: Array.isArray(obj.blockers) ? obj.blockers.filter(b => typeof b === 'string') : [],
           confidence: typeof obj.confidence === 'number' ? obj.confidence : 0.7,
           next_hint: obj.next_hint || '',
         };
       }
     } catch (_) {}
   }
-  return fallbackObservation(blockers, lastAction);
+  return fallbackObservation(lastAction);
 }
 
-function fallbackObservation(blockers, lastAction) {
+function fallbackObservation(lastAction) {
   return {
     state: 'unknown',
     what_changed: `Action "${lastAction || 'unknown'}" was taken`,
