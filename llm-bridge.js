@@ -243,10 +243,10 @@ RULES:
 1. Output ONLY the JSON. Nothing before or after.
 2. OVERLAY visible? Dismiss it first — click its close/done button before anything else.
 3. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
-4. Element marked ⚠️[header control]? Skip it — not a content element.
-5. On search results? Click a result to open it — do NOT reply yet.
-6. Only use reply when the answer is actually visible on screen.
-7. If you typed + pressed enter and the page changed: read the new page context.`;
+4. Element marked ⚠️[header control]? NEVER click it — it is a browser/nav chrome, not page content.
+5. On search/listing results and the goal was to FIND something? Use reply to summarise what you found. Only click into a specific item if the goal requires buying, booking, or getting full details.
+6. Only use reply when the answer/content is actually visible on screen.
+7. If you typed + pressed enter and the page changed: read the new page — do NOT type or press enter again.`;
 
   const messages = isChatMode
     ? [

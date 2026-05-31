@@ -733,7 +733,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
     const currentStep = plan.steps[currentStepIdx];
     tpp.setStep(currentStepIdx);
     let actionCount = 0;
-    let noChangedCount = 0; // actions with zero page diff = stall detection
+    let noChangedCount = 0;    // actions with zero page diff = stall detection
+    let lastExecutedAction = null; // track last action type so diff can be smarter
 
     // ── Already-on-page check ──────────────────────────────────────────────
     // If this step says "open / navigate / go to X" and the browser is
@@ -785,9 +786,10 @@ Return ONLY a JSON array of question strings, nothing else.`;
           const titleChg = prevSnapshot.title !== (activeGraph.title||'');
           const urlChg   = prevSnapshot.url   !== (activeGraph.url||'');
           const isEmpty  = appeared.length===0 && removed.length===0 && !titleChg && !urlChg;
-          if (isEmpty) {
+          // Scroll never changes DOM element IDs — never count toward stall
+          if (isEmpty && lastExecutedAction !== 'scroll') {
             noChangedCount++;
-          } else {
+          } else if (!isEmpty) {
             noChangedCount = 0; // reset stall counter — page moved
             const lines = [];
             if (appeared.length) lines.push(`+ appeared: ${appeared.slice(0,6).join(', ')}`);
@@ -796,27 +798,62 @@ Return ONLY a JSON array of question strings, nothing else.`;
             if (urlChg)   lines.push(`~ URL changed`);
             diffBlock = `PAGE DIFF (since last action):\n${lines.join('\n')}`;
 
-            // Auto-advance: if page moved and next step keywords match new page, advance
-            const nextStep = plan.steps[currentStepIdx + 1];
-            if (nextStep) {
-              const haystack = [(activeGraph.url||''), (activeGraph.title||''),
-                ...(activeGraph.elements||[]).filter(e=>e.id?.startsWith('TXT')).slice(0,8).map(e=>e.text||'')
+            // Unified advance: page moved meaningfully → check next step intent
+            // Require BOTH a movement signal (URL or elements changed) AND intent match
+            // to avoid advancing too early or to the wrong place.
+            const pageMoved = urlChg || appeared.length > 3 || removed.length > 3 || titleChg;
+            if (pageMoved) {
+              const nextStep = plan.steps[currentStepIdx + 1];
+              const haystack = [
+                (activeGraph.url   || ''),
+                (activeGraph.title || ''),
+                ...(activeGraph.elements || [])
+                  .filter(e => e.id?.startsWith('TXT'))
+                  .slice(0, 10)
+                  .map(e => e.text || ''),
               ].join(' ').toLowerCase();
-              const STOP = new Set(['navigate','go','the','a','an','on','in','at','and','or','for','search','find','click','type','open','visit','is','are']);
-              const kws  = nextStep.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>3&&!STOP.has(w));
-              if (kws.length>0 && kws.filter(kw=>haystack.includes(kw)).length >= Math.ceil(kws.length*0.5)) {
-                appendAiMessage(`✓ Page moved — step done. Advancing to: ${nextStep}`);
-                tpp.stepDone(currentStepIdx);
-                currentStepIdx++;
-                previousActions = [`Step complete. Now on: ${activeGraph.title||activeGraph.url||'new page'}.`];
-                prevSnapshot = null;
-                isComplete = currentStepIdx >= plan.steps.length;
-                break;
+
+              const STOP = new Set(['navigate','go','to','the','a','an','on','in','at','and',
+                'or','for','find','click','type','open','visit','is','are','that','this','with']);
+
+              if (nextStep) {
+                // Keywords from the NEXT step — if they appear on the current page we've arrived
+                const kws = nextStep.toLowerCase()
+                  .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+                  .filter(w => w.length > 3 && !STOP.has(w));
+                const matchCount = kws.filter(kw => haystack.includes(kw)).length;
+                if (kws.length > 0 && matchCount >= Math.ceil(kws.length * 0.5)) {
+                  appendAiMessage(`✓ Page moved & next step matches — advancing: ${nextStep}`);
+                  tpp.stepDone(currentStepIdx);
+                  currentStepIdx++;
+                  previousActions = [`Step complete. Now on: ${activeGraph.title || activeGraph.url || 'new page'}.`];
+                  prevSnapshot = null;
+                  lastExecutedAction = null;
+                  isComplete = currentStepIdx >= plan.steps.length;
+                  break;
+                }
+              } else {
+                // Last step — check if current step's goal keywords appear in the new page
+                // If yes, the step is done and the model should reply
+                const currKws = currentStep.toLowerCase()
+                  .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+                  .filter(w => w.length > 3 && !STOP.has(w));
+                const currMatch = currKws.filter(kw => haystack.includes(kw)).length;
+                if (currKws.length > 0 && currMatch >= Math.ceil(currKws.length * 0.4)) {
+                  appendAiMessage(`✓ Last step complete — goal content found on page.`);
+                  tpp.stepDone(currentStepIdx);
+                  currentStepIdx++;
+                  previousActions = [`Step complete. On: ${activeGraph.title || activeGraph.url || 'new page'}. Summarise results for the user.`];
+                  prevSnapshot = null;
+                  lastExecutedAction = null;
+                  isComplete = true;
+                  break;
+                }
               }
             }
           }
-          // Stall: 3 actions, page never moved — trigger replan
-          if (noChangedCount >= 3) {
+          // Stall: 5 non-scroll actions with zero page diff — page genuinely stuck
+          if (noChangedCount >= 5) {
             appendAiMessage('⚠️ Page not responding — replanning...');
             break; // falls through to replan logic
           }
@@ -1169,6 +1206,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
         }
 
         // Stall detection now handled by noChangedCount (page diff engine above)
+
+        // Track which action just ran so the diff engine can be smarter
+        lastExecutedAction = action;
 
         appendAiMessage(msg);
         await delay(1000);
