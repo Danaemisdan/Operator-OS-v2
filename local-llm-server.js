@@ -1,28 +1,21 @@
 const http = require('http');
 const path = require('path');
 
-let model;
-let context;
-let session;        // single persistent session — reset between requests
+let model;       // loaded once, never disposed
+let LlamaChatSession;
 let isReady = false;
 
 async function init() {
   console.log('[Local LLM Server] Initializing node-llama-cpp...');
-  const { getLlama, LlamaChatSession } = await import('node-llama-cpp');
-  const llama = await getLlama();
+  const mod = await import('node-llama-cpp');
+  const llama = await mod.getLlama();
+  LlamaChatSession = mod.LlamaChatSession;
 
   const modelPath = process.env.OPERATOR_MODEL_PATH
     || path.join(__dirname, 'Operator-engine-3b.gguf');
 
   console.log('[Local LLM Server] Loading model from:', modelPath);
   model = await llama.loadModel({ modelPath });
-
-  console.log('[Local LLM Server] Creating context (2048 tokens, 4 threads)...');
-  context = await model.createContext({ contextSize: 2048, threads: 4 });
-
-  // One persistent session — never disposed, history cleared per request
-  const sequence = context.getSequence();
-  session = new LlamaChatSession({ contextSequence: sequence });
 
   isReady = true;
   console.log('[Local LLM Server] Ready on port 8080!');
@@ -36,6 +29,7 @@ async function processQueue() {
   isGenerating = true;
 
   const { res, body } = requestQueue.shift();
+  let reqContext = null;
 
   try {
     const payload = JSON.parse(body);
@@ -44,8 +38,11 @@ async function processQueue() {
 
     console.log(`[Local LLM Server] Received prompt (${prompt.length} chars)`);
 
-    // Reset session history so each request is fully independent
-    try { await session.setChatHistory([]); } catch (_) {}
+    // Fresh context + session for every request — guarantees clean KV cache
+    // Model stays loaded; only the KV cache buffer is recreated (~0.3s overhead)
+    reqContext = await model.createContext({ contextSize: 2048, threads: 4 });
+    const sequence = reqContext.getSequence();
+    const session  = new LlamaChatSession({ contextSequence: sequence });
 
     const opts = {
       temperature: payload.temperature ?? 0.1,
@@ -74,17 +71,21 @@ async function processQueue() {
 
     } else {
       const text = await session.prompt(prompt, opts);
-      console.log(`[Local LLM Server] Non-stream response (${text.length} chars)`);
+      console.log(`[Local LLM Server] Response (${text.length} chars)`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { content: text } }] }));
     }
 
   } catch (err) {
-    console.error('[Local LLM Server] Error during generation:', err.message);
+    console.error('[Local LLM Server] Error:', err.message);
     try { res.writeHead(500); res.end('Internal Server Error'); } catch (_) {}
   } finally {
+    // Dispose the per-request context to free KV cache memory
+    if (reqContext) {
+      try { await reqContext.dispose(); } catch (_) {}
+    }
     isGenerating = false;
-    setTimeout(processQueue, 20); // small gap then process next
+    setTimeout(processQueue, 20);
   }
 }
 
