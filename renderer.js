@@ -392,6 +392,36 @@ async function handleChatSubmit() {
   appendUserMessage(goalText);
   chatInput.value = '';
 
+  // ─── Variable / Credential Detection ─────────────────────────────────────
+  // Intercept messages that look like user providing info to store
+  // e.g. "my email is foo@bar.com", "password is abc123", "my name is Sanjeev"
+  const VAR_PATTERNS = [
+    { re: /my email(?:\s+is|:)\s*(\S+@\S+)/i,       key: 'email' },
+    { re: /(?:my\s+)?password(?:\s+is|:)\s*(\S+)/i,  key: 'password' },
+    { re: /my name(?:\s+is|:)\s*(.+)/i,               key: 'name' },
+    { re: /my phone(?:\s+is|:)\s*(\S+)/i,             key: 'phone' },
+    { re: /my (?:address|city|location)(?:\s+is|:)\s*(.+)/i, key: 'location' },
+    { re: /my (?:zip|pin|postal)(?:\s+is|:)\s*(\S+)/i, key: 'zipcode' },
+    { re: /my dob(?:\s+is|:)\s*(.+)/i,                key: 'dob' },
+    // Generic: "my X is Y" catch-all
+    { re: /my\s+(\w+)\s+is\s+(.+)/i,                  key: null },
+  ];
+  let varDetected = false;
+  for (const { re, key } of VAR_PATTERNS) {
+    const m = goalText.match(re);
+    if (m) {
+      const varKey   = key || m[1].toLowerCase();
+      const varValue = (m[key ? 1 : 2] || '').trim();
+      if (varValue) {
+        await window.electronAPI.setVariable(varKey, varValue);
+        appendAiMessage(`🔐 Got it — saved **${varKey}** for future tasks.`);
+        varDetected = true;
+        break;
+      }
+    }
+  }
+  if (varDetected) return; // don't treat as a task/chat
+
   // ─── KG shortcut: check before intent classification ─────────────────────
   if (await tryKgChatQuery(goalText)) return;
 

@@ -1,6 +1,7 @@
 'use strict';
 
-const http = require('http');
+const http        = require('http');
+const memoryStore = require('./memory'); // user variables + episodic store
 
 // Dismiss-pattern labels that indicate a popup/overlay action button
 const DISMISS_RE = /^(done|dismiss|close|cancel|ok|got it|no thanks|[×✕x]|skip|not now|accept|allow|deny|continue|maybe later|remind me later)$/i;
@@ -226,6 +227,7 @@ ${elLines}`;
 SITUATION:
 ${pageContext}
 ${memory ? `\nMEMORY: ${memory}` : ''}
+${(() => { try { const keys = memoryStore.listVariableKeys(); return keys.length > 0 ? `USER HAS: ${keys.join(', ')} — use these when logging in or filling forms, DO NOT ask user for them` : ''; } catch(_) { return ''; } })()}
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-2).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
@@ -261,6 +263,11 @@ RULES:
     let buffer = '';
     let fullContent = '';
     let resolved = false;
+    // Early-resolve state for executor mode: track JSON brace depth
+    // so we can fire the action the moment {} closes (not waiting for [DONE])
+    let braceDepth = 0;
+    let jsonStarted = false;
+    let req; // declared here so we can destroy on early resolve
 
     const body = JSON.stringify({
       model: 'operator-engine-3b',
@@ -270,7 +277,7 @@ RULES:
       stream: true,
     });
 
-    const req = http.request({
+    req = http.request({
       hostname: '127.0.0.1',
       port: 8080,
       path: '/v1/chat/completions',
@@ -299,6 +306,29 @@ RULES:
                 // Stream tokens to UI only in chat mode — executor JSON stays hidden
                 if (isChatMode && !silent && sender && !sender.isDestroyed()) {
                   sender.send('agent-stream-chunk', token);
+                }
+                // ── Early-resolve for executor mode ────────────────────────
+                // Track brace depth. When outer {} closes → we have a complete
+                // JSON action. Resolve immediately — don't wait for [DONE].
+                if (!isChatMode && !resolved) {
+                  for (const ch of token) {
+                    if (ch === '{') { braceDepth++; jsonStarted = true; }
+                    else if (ch === '}') braceDepth--;
+                  }
+                  if (jsonStarted && braceDepth <= 0) {
+                    try {
+                      const jsonMatch = fullContent.match(/\{[\s\S]*\}/);
+                      if (jsonMatch) {
+                        const earlyParsed = JSON.parse(jsonMatch[0]);
+                        if (earlyParsed.tool) {
+                          resolved = true;
+                          // Destroy the stream — we have what we need
+                          try { req && req.destroy(); } catch (_) {}
+                          resolve(earlyParsed);
+                        }
+                      }
+                    } catch (_) { /* JSON not valid yet — keep accumulating */ }
+                  }
                 }
               }
               if (parsed.choices?.[0]?.finish_reason === 'stop' && !resolved) {
