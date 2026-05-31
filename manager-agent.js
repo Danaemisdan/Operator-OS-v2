@@ -14,38 +14,40 @@ const http = require('http');
  */
 async function decomposeGoal(goal, availableSkills, currentUrl, sender) {
   const prompt =
-    `You are a task planning agent. Break the user's goal into 2-4 clear, sequential browser steps.\n` +
+    `You are a task planning agent. Break the user's goal into 2-5 clear, sequential browser steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
-    `NAVIGATION RULES (follow strictly):\n` +
-    `1. When the user names a website/service, navigate to its HOMEPAGE only (e.g. https://amazon.com, https://youtube.com).\n` +
-    `   NEVER guess or construct deep URL paths like /tech/laptops/ or /search?q=... — you do not know what paths exist on any site.\n` +
-    `   Let the site's own search/navigation do the work once you arrive.\n` +
-    `2. When no specific site is named, navigate to a relevant search engine and search there.\n` +
-    `3. Steps must be CONCRETE and executable — not summaries.\n` +
-    `   BAD: "search for shoes" — the executor doesn't know where or what to type.\n` +
-    `   GOOD: "type 'cool shoes for men' into the search box and submit" or "click the search box and type 'shoes'"\n` +
-    `   BAD: "click the search result" — which one? Be specific about what to look for.\n` +
-    `   GOOD: "click the first product listing that matches the goal"\n\n` +
-    `CLARIFYING QUESTIONS — before planning, decide if critical info is missing:\n` +
-    `Ask ONLY when the missing info changes which site to visit or what to type into a search.\n` +
-    `Examples worth asking: budget range for shopping, job role or location for job search, travel dates for booking.\n` +
-    `Never ask about: how to do the task, aesthetic preferences, anything a reasonable default covers.\n` +
-    `Max 2 questions. If goal is specific enough, return questions as empty array.\n\n` +
+    `STEPS FORMAT RULES (critical):\n` +
+    `- Every step MUST be a plain English sentence string. NEVER put a JSON object or raw URL inside steps[].\n` +
+    `- Navigate steps: say the site name only — "navigate to Instagram" NOT "navigate https://instagram.com"\n` +
+    `- Never construct deep URLs — let the site's own search/nav do the work once you arrive.\n` +
+    `- Steps must be CONCRETE: say what to type or what to click specifically.\n` +
+    `  BAD: "search for shoes" | GOOD: "type 'cool running shoes' into the search box and press enter"\n` +
+    `  BAD: "click the result" | GOOD: "click the first matching result in the list"\n\n` +
+    `CLARIFYING QUESTIONS — if the goal is ambiguous, ask before planning:\n` +
+    `Ask when missing info directly changes what site to use, what to search for, or who/what to target.\n` +
+    `Examples REQUIRING questions:\n` +
+    `  "follow people on instagram" → ask: which account to target? any specific criteria?\n` +
+    `  "find me a job" → ask: what role? what location?\n` +
+    `  "buy something" → ask: what product? what budget?\n` +
+    `  "book a flight" → ask: from where? to where? when?\n` +
+    `Examples NOT requiring questions:\n` +
+    `  "search youtube for lofi music" → specific enough\n` +
+    `  "open amazon" → obvious destination\n` +
+    `Max 2 questions. Return questions:[] if goal is fully specified.\n\n` +
     `RESEARCH SKILLS — headless tools that run before the browser opens:\n` +
     `- searchLeads: returns structured list of people matching a role/industry/location\n` +
     `- lookupCompany: returns structured data about a named company\n` +
     `- lookupApp: returns structured data about a named software/app\n` +
     `- searchNews: returns recent news articles on a topic\n` +
     `- extractPageData: extracts structured data from a URL\n\n` +
-    `RESEARCH GATE — ask: would the research output directly feed into the browser steps as input?\n` +
-    `  YES → set research_needed=true and choose the right skill\n` +
-    `  NO  → set research_needed=false and just plan browser steps\n\n` +
-    `JSON output format:\n` +
-    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":[...]}\n\n` +
+    `RESEARCH GATE — set research_needed=true only if research output feeds directly into browser steps.\n\n` +
+    `Output format (steps[] contains ONLY plain string sentences):\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["sentence 1","sentence 2"]}\n\n` +
     `Goal: "${goal}"\n` +
     `Current page: ${currentUrl || 'New tab'}\n` +
-    `Available skills (executor can use these directly for common tasks): ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
-    `Output ONLY JSON: {"questions":[],"research_needed":bool,"research_skill":null_or_string,"research_args":null_or_object,"steps":[]}`;
+    `Available skills: ${availableSkills.length > 0 ? availableSkills.join(', ') : 'none'}\n\n` +
+    `Output ONLY JSON:`;
+
 
 
   const body = JSON.stringify({
@@ -135,12 +137,19 @@ function parseSteps(full, goal) {
       if (Array.isArray(obj.steps) && obj.steps.length > 0) {
         const steps = obj.steps
           .map(s => {
-            // If the LLM returned a step as an object {action, url, text, ...} instead of a string,
-            // extract a readable description from it.
+            // Step is a JSON object — extract the most meaningful text from all possible fields
             if (s && typeof s === 'object') {
               const a = s.action || s.type || '';
-              const detail = s.url || s.text || s.query || s.target || s.description || s.step || '';
-              return detail ? `${a} ${detail}`.trim() : (s.description || s.step || JSON.stringify(s));
+              const detail = s.url || s.text || s.query || s.target ||
+                s.searchTerm || s.searchQuery || s.term || s.value ||
+                s.description || s.step || s.instruction || '';
+              // Build a readable sentence instead of stringifying the object
+              if (a && detail) return `${a} ${detail}`.trim();
+              if (detail) return detail;
+              if (a) return a;
+              // Last resort: join all string values
+              const vals = Object.values(s).filter(v => typeof v === 'string' && v.length > 2);
+              return vals.length > 0 ? vals.join(' ') : JSON.stringify(s);
             }
             return String(s);
           })
