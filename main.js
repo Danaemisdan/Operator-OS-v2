@@ -62,7 +62,7 @@ app.whenReady().then(() => {
   console.log('[Main] Starting LLM server:', serverScript);
   console.log('[Main] Model path:', modelPath);
 
-  llmProcess = spawn(process.execPath, ['--experimental-vm-modules', serverScript], {
+  llmProcess = spawn(process.execPath, [serverScript], {
     stdio: 'inherit',
     env: { ...process.env, OPERATOR_MODEL_PATH: modelPath, ELECTRON_RUN_AS_NODE: '1' }
   });

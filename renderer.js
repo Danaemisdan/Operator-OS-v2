@@ -834,11 +834,18 @@ Return ONLY a JSON array of question strings, nothing else.`;
         let msg = `<div class="thought-log">🤔 ${thought}<br>🎯 <em>Expects: ${expectation}</em></div>▶️ **${action || 'thinking'}**`;
 
         if (action === 'navigate') {
-          const navUrl = (args.text || '').trim();
-          if (!navUrl.startsWith('http')) {
-            msg += `<br>⚠️ Bad URL: ${navUrl}`;
-            previousActions.push(`Bad URL attempted: ${navUrl}`);
-          } else {
+          let navUrl = (args.text || '').trim();
+          // Auto-fix: prepend https:// if missing — supports .co, .io, .net, any TLD
+          if (navUrl && !navUrl.startsWith('http')) {
+            // Only treat as URL if it looks like a domain (has a dot, no spaces)
+            if (navUrl.includes('.') && !navUrl.includes(' ')) {
+              navUrl = 'https://' + navUrl;
+            } else {
+              msg += `<br>⚠️ Not a URL: "${navUrl}" — use navigate only for URLs`;
+              previousActions.push(`navigate called with non-URL "${navUrl}". To go somewhere, use navigate with a proper domain like https://example.com`);
+            }
+          }
+          if (navUrl.startsWith('http')) {
             // ── Deduplicate: skip navigation if already on this URL ──────
             const currentUrl = wv.src || '';
             const isSameOrigin = currentUrl.startsWith(navUrl) || navUrl.startsWith(currentUrl.split('?')[0]);

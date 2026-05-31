@@ -232,7 +232,7 @@ function classifyElementPurpose(el) {
   if (tag === 'input' || tag === 'textarea') {
     if (ph.includes('first name') || ph.includes('last name') || ph.includes('full name') || ph.includes('your name'))
       return { category: 'input_name',    purpose: `Name field: "${ph}"`, confidence: 0.96 };
-    if (ph.includes('phone') || ph.includes('mobile') || type === 'tel')
+    if (ph.includes('phone') || ph.includes('mobile') || inputType === 'tel')
       return { category: 'input_phone',   purpose: `Phone number field: "${ph}"`, confidence: 0.96 };
     if (ph.includes('address') || ph.includes('city') || ph.includes('zip') || ph.includes('postcode'))
       return { category: 'input_address', purpose: `Address/location field: "${ph}"`, confidence: 0.95 };
@@ -253,7 +253,7 @@ function classifyElementPurpose(el) {
   }
 
   // ── File / upload ──────────────────────────────────────────────────────────
-  if (type === 'file' || tL.includes('upload') || tL.includes('attach file') || tL.includes('choose file'))
+  if (inputType === 'file' || tL.includes('upload') || tL.includes('attach file') || tL.includes('choose file'))
     return { category: 'file_upload', purpose: 'Upload a file (resume, image, document)', confidence: 0.95 };
 
   // ── Video / media controls ─────────────────────────────────────────────────
@@ -323,9 +323,9 @@ function classifyElementPurpose(el) {
   }
 
   // ── Checkbox / radio ───────────────────────────────────────────────────────
-  if (type === 'checkbox')
+  if (inputType === 'checkbox')
     return { category: 'checkbox',      purpose: `Checkbox: "${t || aria}" — toggles selection`, confidence: 0.87 };
-  if (type === 'radio')
+  if (inputType === 'radio')
     return { category: 'radio',         purpose: `Radio option: "${t || aria}"`, confidence: 0.87 };
 
   return null;
