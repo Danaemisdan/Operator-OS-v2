@@ -689,6 +689,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
   const MAX_REPLANS = 2;
   const MAX_ACTIONS_PER_STEP = 7;
   const delay = ms => new Promise(r => setTimeout(r, ms));
+  // In-memory element state — tracks typed/clicked without DOM re-extraction
+  // Reset whenever URL changes (new page = fresh state)
+  const elementState = new Map();
 
   while (!isComplete && currentStepIdx < plan.steps.length) {
     const currentStep = plan.steps[currentStepIdx];
@@ -737,6 +740,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
+        // Annotate graph elements with tracked state (no DOM re-read)
+        const annotatedGraph = {
+          ...prunedGraph,
+          elements: (prunedGraph.elements || []).map(el => {
+            const st = elementState.get(el.id);
+            return st ? { ...el, _state: st } : el;
+          }),
+        };
 
         // Update thought in TPP while LLM decides next action
         tpp.setThought(`Deciding: ${currentStep.substring(0, 80)}`);
@@ -760,7 +771,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         streamDiv = null;
         const agentResponse = await window.electronAPI.agentChat(
-          contextualStep, prunedGraph, previousActions, memory, []
+          contextualStep, annotatedGraph, previousActions, memory, []
         );
         streamDiv = null;
 
@@ -862,6 +873,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
             } else {
               msg += `<br>🌐 → ${navUrl}`;
               wv.src = navUrl;
+              elementState.clear();
               await waitForPageLoad(wv);
               await delay(800);
               await refreshActiveGraph(wv);
@@ -885,9 +897,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
         } else if (action === 'scroll') {
           msg += `<br>↕️ Scroll`;
           await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'scroll', payload: { deltaX: 0, deltaY: 300, x: 500, y: 500 } });
-          await delay(600);
+          await delay(700); // give page time to settle before re-reading DOM
           await refreshActiveGraph(wv);
-          previousActions.push(`Expectation: "${expectation}". Outcome: Scrolled page`);
+          previousActions.push(`Scrolled page. New elements may be visible.`);
 
         } else if (action === 'ask_user') {
           const question = args.text || 'I need more info.';
@@ -956,10 +968,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
             let outcome = `Executed ${action} on ${targetId}. `;
             if (action === 'type') {
               outcome += `Typed "${(args.text || '').substring(0, 60)}" into ${targetId}. `;
-              outcome += `FIELD ${targetId} NOW CONTAINS: "${(args.text || '')}". DO NOT type into this field again. Next action should be press_enter to submit, or click the search/submit button.`;
+              outcome += `FIELD ${targetId} NOW CONTAINS: "${(args.text || '')}". DO NOT type into this field again. Next: press_enter or click submit.`;
+              elementState.set(targetId, { typed: true, value: args.text || '' });
+            } else if (action === 'click') {
+              elementState.set(targetId, { clicked: true });
             }
             if (urlNow !== urlBefore) {
-              outcome += `URL changed to ${urlNow}. `;
+              outcome += `URL changed. `;
+              elementState.clear(); // new page = fresh element state
             } else if (action !== 'type' && domBefore !== domAfter) {
               outcome += `DOM changed (content updated/modal/autocomplete appeared). `;
             }

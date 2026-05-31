@@ -161,8 +161,11 @@ function parseSteps(full, goal) {
             .trim()
           )
           .filter(s => s.length > 3 && s !== '[object Object]');
-        if (steps.length > 0) return {
-          steps,
+        // Filter garbage steps — tool-name + status strings from confused model output
+        const GARBAGE_STEP = /^(navigate|type|click|scroll|press_enter|reply|ask_user)\s+(running|complete|done|failed|error|pending)$/i;
+        const cleanSteps = steps.filter(s => !GARBAGE_STEP.test(s.trim()));
+        if (cleanSteps.length > 0) return {
+          steps: cleanSteps,
           questions: Array.isArray(obj.questions) ? obj.questions.filter(q => typeof q === 'string' && q.length > 3) : [],
           current: 0,
           research_needed:  obj.research_needed === true,

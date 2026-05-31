@@ -2,7 +2,10 @@
 const http = require('http');
 const path = require('path');
 
-let model, LlamaChatSession, session;
+let model;
+let context;
+let LlamaChatSession;
+let session;
 let isReady = false;
 let isGenerating = false;
 const requestQueue = [];
@@ -19,21 +22,35 @@ async function init() {
   console.log('[Local LLM Server] Loading model from:', modelPath);
   model = await llama.loadModel({ modelPath });
 
-  // One context, one sequence — shared across all requests.
-  // clearHistory() before each request resets the KV cache without re-allocating.
   console.log('[Local LLM Server] Creating context (4096 tokens, 4 threads)...');
-  const context = await model.createContext({ contextSize: 4096, threads: 4 });
+  context = await model.createContext({ contextSize: 4096, threads: 4 });
   session = new LlamaChatSession({ contextSequence: context.getSequence() });
 
   isReady = true;
   console.log('[Local LLM Server] Ready on port 8080!');
 }
 
-async function handleRequest(res, body) {
-  // Reset session state — clears KV cache so each request gets a clean slate
-  try { await session.clearHistory(); } catch (_) {
-    try { session.clearHistory(); } catch (_2) {}
+
+async function freshSession() {
+  // Dispose current session (releases its sequence slot back to context)
+  try { session.dispose(); } catch (_) {}
+  // Try to get a fresh sequence from the existing context — cheap and fast
+  try {
+    session = new LlamaChatSession({ contextSequence: context.getSequence() });
+    return;
+  } catch (_) {}
+  // Sequence not yet available — recreate just the context (model stays loaded)
+  try {
+    context = await model.createContext({ contextSize: 4096, threads: 4 });
+    session = new LlamaChatSession({ contextSequence: context.getSequence() });
+  } catch (e) {
+    console.error('[Local LLM Server] Session recreation failed:', e.message);
   }
+}
+
+async function handleRequest(res, body) {
+  // Fresh session every request = guaranteed clean KV cache, no accumulation
+  await freshSession();
 
   const payload  = JSON.parse(body);
   const messages = payload.messages || [];

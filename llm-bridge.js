@@ -1,5 +1,9 @@
 'use strict';
+
 const http = require('http');
+
+// Dismiss-pattern labels that indicate a popup/overlay action button
+const DISMISS_RE = /^(done|dismiss|close|cancel|ok|got it|no thanks|[×✕x]|skip|not now|accept|allow|deny|continue|maybe later|remind me later)$/i;
 
 // ─── UI Analysis (heuristic, no LLM needed) ───────────────────────────────────
 function analyzeUIWithLLM(graph) {
@@ -164,24 +168,46 @@ async function chatAgentWithLLM(promptText, graph, previousActions = [], sender,
 - Title: ${graph.title || 'Unknown'}
 ${pageSummary}`;
     } else {
-      // Fallback: build from raw elements (used when exploration hasn't run yet)
+      // Fallback: build from raw elements — annotated with in-memory state and position
       const els = graph.elements || [];
       const textContent = els
         .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
-        .slice(0, 10).map(e => e.text.trim()).join(' | ');
+        .slice(0, 8).map(e => e.text.trim()).join(' | ');
       const interactiveEls = els.filter(e =>
         e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
       );
+
+      // ── Overlay / popup detection ────────────────────────────────────────
+      // Dismiss-labelled elements signal a blocking popup that must be handled first
+      const overlayEls = interactiveEls.filter(e => DISMISS_RE.test((e.text || e.placeholder || '').trim()));
+      const overlayBlock = overlayEls.length > 0
+        ? `\n⚠️ POPUP/OVERLAY IS BLOCKING THE PAGE — dismiss it FIRST before any other action:\n` +
+          overlayEls.map(e => `  [${e.id}] "${e.text || e.placeholder}" — closes/dismisses this overlay`).join('\n') + '\n'
+        : '';
+
+      // ── Build element list with state + header zone hints ─────────────────
+      const elLines = interactiveEls.slice(0, 15).map(e => {
+        const label = (e.text || e.placeholder || '').substring(0, 50);
+        // In-memory state — typed value or clicked flag injected by renderer
+        const st = e._state;
+        const stateStr = st?.typed  ? ` [✓ FILLED: "${st.value}"]` :
+                         st?.clicked ? ` [✓ CLICKED]` : '';
+        // Current DOM value (if not overridden by state)
+        const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
+        // Header zone: Y < 70 means navigation/settings bar — not a content link
+        const isHeader = e.position && e.position.y < 70;
+        const zoneHint = isHeader ? ' ⚠️[header control — do not click for content tasks]' : '';
+        const desc = e.predictedEffect || e._exploration?.purpose || e.role || '';
+        return `  [${e.id}]${zoneHint} "${label}"${stateStr}${valStr} — ${desc}`;
+      }).join('\n');
+
       pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
 - Page type: ${graph.semanticPattern || 'Unknown'}
-- Visible text: ${textContent || '(none)'}
+- Visible text: ${textContent || '(none)'}${overlayBlock}
 - Interactive elements (${interactiveEls.length}):
-${interactiveEls.slice(0, 15).map(e => {
-  const val = e.value ? ` [value: "${e.value}"]` : '';
-  return `  [${e.id}] "${e.text || e.placeholder || ''}"${val} — ${e.predictedEffect || e._exploration?.purpose || e.role || ''}`;
-}).join('\n')}`;
+${elLines}`;
     }
   }
 
