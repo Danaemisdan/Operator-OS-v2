@@ -18,8 +18,9 @@ async function init() {
   console.log('[Local LLM Server] Loading model from:', modelPath);
   model = await llama.loadModel({ modelPath });
 
-  console.log('[Local LLM Server] Creating context (2048 tokens, 4 threads)...');
-  context = await model.createContext({ contextSize: 2048, threads: 4 });
+  // Create context with 2 sequence slots — one active + one buffer during swap
+  console.log('[Local LLM Server] Creating context (2048 tokens, 4 threads, 2 sequences)...');
+  context = await model.createContext({ contextSize: 2048, threads: 4, sequences: 2 });
 
   isReady = true;
   console.log('[Local LLM Server] Ready on port 8080!');
@@ -35,7 +36,7 @@ async function handleRequest(res, body) {
 
   console.log(`[Local LLM Server] Received prompt (${prompt.length} chars)`);
 
-  // Fresh sequence from the shared context — this gives a clean KV cache slot
+  // Fresh session for every request — guarantees clean state, no history contamination
   const sequence = context.getSequence();
   const session  = new LlamaChatSession({ contextSequence: sequence });
 
@@ -44,39 +45,40 @@ async function handleRequest(res, body) {
     maxTokens:   payload.max_tokens  || 512,
   };
 
-  let text = '';
+  try {
+    let outputLen = 0;
 
-  if (payload.stream) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':   'keep-alive',
-    });
+    if (payload.stream) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection':   'keep-alive',
+      });
 
-    await session.prompt(prompt, {
-      ...opts,
-      onTextChunk: (chunk) => {
-        text += chunk;
-        try {
-          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`);
-        } catch (_) {}
-      },
-    });
+      await session.prompt(prompt, {
+        ...opts,
+        onTextChunk: (chunk) => {
+          outputLen += chunk.length;
+          try {
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`);
+          } catch (_) {}
+        },
+      });
 
-    console.log(`[Local LLM Server] Streamed response completed (${text.length} chars)`);
-    res.write('data: [DONE]\n\n');
-    res.end();
+      console.log(`[Local LLM Server] Streamed response completed (${outputLen} chars)`);
+      res.write('data: [DONE]\n\n');
+      res.end();
 
-  } else {
-    text = await session.prompt(prompt, opts);
-    console.log(`[Local LLM Server] Response (${text.length} chars)`);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { content: text } }] }));
+    } else {
+      const text = await session.prompt(prompt, opts);
+      console.log(`[Local LLM Server] Response (${text.length} chars)`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: text } }] }));
+    }
+  } finally {
+    // Dispose session to free the sequence slot back to the pool
+    try { session.dispose(); } catch (_) {}
   }
-
-  // Reset KV cache for this sequence so next request gets a clean slate
-  // clearHistory() exists on LlamaContextSequence and resets token state
-  try { await sequence.clearHistory(); } catch (_) {}
 }
 
 async function processQueue() {
@@ -88,7 +90,7 @@ async function processQueue() {
   try {
     await handleRequest(res, body);
   } catch (err) {
-    console.error('[Local LLM Server] Error:', err.message, err.stack?.split('\n')[1] || '');
+    console.error('[Local LLM Server] Error:', err.message);
     try { res.writeHead(500); res.end('Internal Server Error'); } catch (_) {}
   } finally {
     isGenerating = false;
