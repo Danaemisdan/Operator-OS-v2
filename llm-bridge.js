@@ -283,7 +283,36 @@ Respond with ONLY this JSON:
       res.on('error', () => { if (!resolved) { resolved = true; resolve({ tool: 'reply', args: { text: 'Stream error.' }, status: 'error' }); } });
     });
 
-    req.on('error', () => { if (!resolved) { resolved = true; resolve({ tool: 'reply', args: { text: 'LLM server offline.' }, status: 'error' }); } });
+    req.on('error', async (err) => {
+      if (!resolved && (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET')) {
+        // Server not ready yet or restarting — wait and retry once
+        await new Promise(r => setTimeout(r, 1500));
+        try {
+          const retryReq = http.request({ hostname: '127.0.0.1', port: 8080, path: '/v1/chat/completions', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+            (retryRes) => {
+              let retryBuf = '', retryFull = '';
+              retryRes.on('data', c => {
+                retryBuf += c.toString();
+                const ls = retryBuf.split('\n'); retryBuf = ls.pop();
+                for (const l of ls) {
+                  if (l.trim() === 'data: [DONE]') { if (!resolved) { resolved = true; resolveResponse(retryFull, isChatMode, resolve); } return; }
+                  if (l.trim().startsWith('data: ')) { try { const p = JSON.parse(l.trim().slice(6)); const t = p.choices?.[0]?.delta?.content; if (t) { retryFull += t; if (isChatMode && sender && !sender.isDestroyed()) sender.send('agent-stream-chunk', t); } } catch(_){} }
+                }
+              });
+              retryRes.on('end', () => { if (!resolved) { resolved = true; resolveResponse(retryFull, isChatMode, resolve); } });
+            }
+          );
+          retryReq.on('error', () => { if (!resolved) { resolved = true; resolve({ tool: 'reply', args: { text: 'LLM server offline.' }, status: 'error' }); } });
+          retryReq.write(body); retryReq.end();
+        } catch (_) {
+          if (!resolved) { resolved = true; resolve({ tool: 'reply', args: { text: 'LLM server offline.' }, status: 'error' }); }
+        }
+      } else if (!resolved) {
+        resolved = true;
+        resolve({ tool: 'reply', args: { text: 'LLM server offline.' }, status: 'error' });
+      }
+    });
     req.write(body);
     req.end();
   });

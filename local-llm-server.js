@@ -1,15 +1,15 @@
 const http = require('http');
 const path = require('path');
 
-let llama;
 let model;
 let context;
+let session;        // single persistent session — reset between requests
 let isReady = false;
 
 async function init() {
   console.log('[Local LLM Server] Initializing node-llama-cpp...');
-  const { getLlama } = await import('node-llama-cpp');
-  llama = await getLlama();
+  const { getLlama, LlamaChatSession } = await import('node-llama-cpp');
+  const llama = await getLlama();
 
   const modelPath = process.env.OPERATOR_MODEL_PATH
     || path.join(__dirname, 'Operator-engine-3b.gguf');
@@ -19,6 +19,10 @@ async function init() {
 
   console.log('[Local LLM Server] Creating context (2048 tokens, 4 threads)...');
   context = await model.createContext({ contextSize: 2048, threads: 4 });
+
+  // One persistent session — never disposed, history cleared per request
+  const sequence = context.getSequence();
+  session = new LlamaChatSession({ contextSequence: sequence });
 
   isReady = true;
   console.log('[Local LLM Server] Ready on port 8080!');
@@ -36,25 +40,27 @@ async function processQueue() {
   try {
     const payload = JSON.parse(body);
     const messages = payload.messages || [];
-    const prompt = messages.map(m => m.content).join('\n');
+    const prompt   = messages.map(m => m.content).join('\n');
 
     console.log(`[Local LLM Server] Received prompt (${prompt.length} chars)`);
 
-    // Get a fresh sequence for this request — re-use the same context
-    const sequence = context.getSequence();
-    const { LlamaChatSession } = await import('node-llama-cpp');
-    const session = new LlamaChatSession({ contextSequence: sequence });
+    // Reset session history so each request is fully independent
+    try { await session.setChatHistory([]); } catch (_) {}
+
+    const opts = {
+      temperature: payload.temperature ?? 0.1,
+      maxTokens:   payload.max_tokens  || 512,
+    };
 
     if (payload.stream) {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        'Connection':   'keep-alive',
       });
 
       await session.prompt(prompt, {
-        temperature: payload.temperature ?? 0.1,
-        maxTokens: payload.max_tokens || 512,
+        ...opts,
         onTextChunk: (chunk) => {
           try {
             res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`);
@@ -65,28 +71,20 @@ async function processQueue() {
       res.write('data: [DONE]\n\n');
       res.end();
       console.log('[Local LLM Server] Streamed response completed');
-    } else {
-      const text = await session.prompt(prompt, {
-        temperature: payload.temperature ?? 0.1,
-        maxTokens: payload.max_tokens || 512,
-      });
 
-      console.log(`[Local LLM Server] Generated response (${text.length} chars)`);
+    } else {
+      const text = await session.prompt(prompt, opts);
+      console.log(`[Local LLM Server] Non-stream response (${text.length} chars)`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { content: text } }] }));
     }
 
-    // Clean up sequence without crashing — try each method defensively
-    try { await sequence.clearHistory(); } catch (_) {}
-    try { sequence.dispose(); } catch (_) {}
-
   } catch (err) {
-    console.error('[Local LLM Server] Error:', err.message);
+    console.error('[Local LLM Server] Error during generation:', err.message);
     try { res.writeHead(500); res.end('Internal Server Error'); } catch (_) {}
   } finally {
     isGenerating = false;
-    // Small gap to let GC settle before next request
-    setTimeout(processQueue, 50);
+    setTimeout(processQueue, 20); // small gap then process next
   }
 }
 
@@ -100,7 +98,7 @@ const server = http.createServer((req, res) => {
     });
   } else if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: isReady ? 'ready' : 'loading' }));
+    res.end(JSON.stringify({ status: isReady ? 'ready' : 'loading', queue: requestQueue.length }));
   } else {
     res.writeHead(404);
     res.end('Not Found');
