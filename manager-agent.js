@@ -17,18 +17,14 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
     `You are a smart browser task planning agent. Your job is to break the user's goal into 2-5 specific, richly-described sequential steps.\n` +
     `Output ONLY a raw JSON object. No explanation. No prose. No markdown. Start with { immediately.\n\n` +
 
-    `STEP QUALITY RULES — this is the most important part:\n` +
-    `- Steps must be GOAL-LEVEL descriptions, not browser instructions. The executor handles clicking/typing.\n` +
-    `- Steps must be SPECIFIC to this exact goal — include the actual names, queries, targets from the goal.\n` +
-    `- GOOD: "navigate to LinkedIn", "search for 'software engineer jobs in Bangalore'", "click the first job listing that matches the goal"\n` +
-    `- BAD: "navigate to a job site", "search for jobs", "click a result" — too vague, the executor is lost\n` +
-    `- Navigate steps: always name the site — "navigate to LinkedIn", "navigate to Amazon". Never raw URLs.\n` +
-    `- Search steps: include the exact search query derived from the goal.\n` +
-    `- Click steps: describe what to click — "click the first furniture result", "click on the cheapest product listed"\n` +
-    `- Research/shopping tasks need INTERMEDIATE steps: search → click result → read content → report. Do NOT skip the click step.\n` +
-    `- GOOD shopping plan: ["search Google for 'affordable sofas'", "click the first relevant result or site", "find prices on the page", "report cheapest options to the user"]\n` +
-    `- BAD shopping plan: ["search Google for 'affordable sofas'", "read and report the price"] — skips navigation to product page!\n` +
-    `- Only add a 'report to the user' step AFTER steps that will actually load the relevant data onto the page.\n\n` +
+    `STEP QUALITY RULES — most important:\n` +
+    `- Match detail level to the task. Simple tasks: 2-3 high-level steps. Complex tasks: can include specific click/type/navigate steps where each step is a real decision point.\n` +
+    `- NEVER split a single logical action into multiple micro-steps. \"click Cheapest filter\" is one step — not \"scroll to filter\", \"locate Cheapest\", \"click it\".\n` +
+    `- Steps must be SPECIFIC to this goal — include the actual site names, queries, filter names, values from the goal.\n` +
+    `- Search steps: include the exact query. Navigate steps: name the site. Report steps: say what to report.\n` +
+    `- Group related sub-actions: \"search Google Flights for cheapest one-way NYC→LA and apply Cheapest filter\" is one step, not five.\n` +
+    `- A good flight plan: [\"search Google for 'cheapest flights'\", \"navigate to Google Flights or Skyscanner\", \"search for cheapest one-way options and apply price filter\", \"report the best deals found\"]\n` +
+    `- A bad flight plan: 20 steps for click 'One way' tab, click 'Departure city', type 'New York', click 'Search'... — these are UI details the executor handles.\n\n` +
 
     `CLARIFYING QUESTIONS — ask ONLY when the answer structurally changes the plan:\n` +
     `- What to search for is unknown → ask\n` +

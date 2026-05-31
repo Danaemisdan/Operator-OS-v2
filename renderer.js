@@ -744,14 +744,18 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
 
         // Build rich page context — limit pageSummary to keep total prompt under 4096 tokens
-        const pageSummary = (activeGraph._exploration?.llm_summary || '').slice(0, 600);
+        const pageSummary = (activeGraph._exploration?.llm_summary || '').slice(0, 500);
+        // Strip query params from URL — they're 300-600 chars of noise, hostname+path is enough
+        const shortUrl = (() => { try { const u = new URL(activeGraph.url); return u.origin + u.pathname; } catch(_) { return (activeGraph.url || '').slice(0, 80); } })();
+        // Keep only last 2 actions, each truncated — full history is in memory system
+        const recentActions = previousActions.slice(-2).map(a => a.slice(0, 120));
         const contextualStep = [
           `GOAL: ${executorGoal}`,
           `STEP (${currentStepIdx + 1}/${plan.steps.length}): ${currentStep}`,
-          `URL: ${activeGraph.url}`,
+          `URL: ${shortUrl}`,
           `TITLE: ${activeGraph.title || 'Unknown'}`,
           pageSummary || `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`,
-          previousActions.length ? `RECENT:\n${previousActions.slice(-3).map(a => '  - ' + a).join('\n')}` : '',
+          recentActions.length ? `RECENT:\n${recentActions.map(a => '  - ' + a).join('\n')}` : '',
         ].filter(Boolean).join('\n');
 
         streamDiv = null;

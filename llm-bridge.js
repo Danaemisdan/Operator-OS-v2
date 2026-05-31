@@ -317,29 +317,30 @@ RULES:
 // ─── Response parser ──────────────────────────────────────────────────────────
 function resolveResponse(fullContent, isChatMode, resolve) {
   if (!isChatMode) {
-    // Log raw executor output so we can see what the model actually generates
     console.log('[Executor output]:', JSON.stringify(fullContent.slice(0, 300)));
   }
   if (isChatMode) {
     resolve({ tool: 'reply', args: { text: fullContent.trim() }, status: 'complete' });
     return;
   }
+  // Strip role prefix the model sometimes outputs when session KV cache isn't fully reset
+  const cleanContent = fullContent.replace(/^\s*(assistant|system|user)\s*\n+/i, '').trim();
   // Try direct JSON extraction
   try {
-    const m = fullContent.match(/\{[\s\S]*\}/);
+    const m = cleanContent.match(/\{[\s\S]*\}/);
     if (m) {
       const parsed = JSON.parse(m[0]);
       if (parsed.tool || parsed.status) { resolve(parsed); return; }
     }
   } catch (_) {}
   // Regex fallback for partial JSON from small models
-  const tool   = (fullContent.match(/"tool"\s*:\s*"([^"]+)"/) || [])[1];
-  const status = (fullContent.match(/"status"\s*:\s*"([^"]+)"/) || [])[1];
-  const thought= (fullContent.match(/"thought"\s*:\s*"([^"]+)"/) || [])[1];
-  const expectation = (fullContent.match(/"expectation"\s*:\s*"([^"]+)"/) || [])[1];
-  const tid    = (fullContent.match(/"targetId"\s*:\s*"([^"]+)"/) || [])[1];
-  const txt    = (fullContent.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1];
-  const extData= (fullContent.match(/"extracted_data"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1];
+  const tool   = (cleanContent.match(/"tool"\s*:\s*"([^"]+)"/) || [])[1];
+  const status = (cleanContent.match(/"status"\s*:\s*"([^"]+)"/) || [])[1];
+  const thought= (cleanContent.match(/"thought"\s*:\s*"([^"]+)"/) || [])[1];
+  const expectation = (cleanContent.match(/"expectation"\s*:\s*"([^"]+)"/) || [])[1];
+  const tid    = (cleanContent.match(/"targetId"\s*:\s*"([^"]+)"/) || [])[1];
+  const txt    = (cleanContent.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1];
+  const extData= (cleanContent.match(/"extracted_data"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1];
   
   if (tool || status === 'complete') {
     resolve({
@@ -355,7 +356,7 @@ function resolveResponse(fullContent, isChatMode, resolve) {
     });
   } else {
     // Last resort: try to extract an action from prose output
-    const proseAction = extractFromProse(fullContent);
+    const proseAction = extractFromProse(cleanContent);
     if (proseAction) { resolve(proseAction); return; }
     // Truly unparseable — scroll as safe default to give the model fresh context
     resolve({
