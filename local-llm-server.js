@@ -19,8 +19,8 @@ async function init() {
   model = await llama.loadModel({ modelPath });
 
   // Create context with 2 sequence slots — one active + one buffer during swap
-  console.log('[Local LLM Server] Creating context (2048 tokens, 4 threads, 2 sequences)...');
-  context = await model.createContext({ contextSize: 2048, threads: 4, sequences: 2 });
+  console.log('[Local LLM Server] Creating context (4096 tokens, 4 threads, 2 sequences)...');
+  context = await model.createContext({ contextSize: 4096, threads: 4, sequences: 2 });
 
   isReady = true;
   console.log('[Local LLM Server] Ready on port 8080!');

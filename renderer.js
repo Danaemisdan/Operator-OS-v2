@@ -449,14 +449,13 @@ async function handleChatSubmit() {
     const wantsPage     = PAGE_KEYWORDS.some(k => q.includes(k));
     const wantsElements = ELEMENT_KEYWORDS.some(k => q.includes(k));
 
-    // Use compact llm_summary instead of raw elements — much shorter prompt = faster
+    // Only pass page URL/context if the user is explicitly asking about the page.
+    // For greetings/general chat, pass empty graph so model responds conversationally.
     let chatGraph = { url: '', title: '', elements: [] };
     let pageSummaryForChat = '';
-    if (activeGraph) {
+    if (activeGraph && (wantsPage || wantsElements)) {
       chatGraph = { url: activeGraph.url, title: activeGraph.title, elements: [] };
-      if (wantsPage || wantsElements) {
-        pageSummaryForChat = activeGraph._exploration?.llm_summary || '';
-      }
+      pageSummaryForChat = activeGraph._exploration?.llm_summary || '';
     }
 
     streamDiv = null;
@@ -760,15 +759,15 @@ Return ONLY a JSON array of question strings, nothing else.`;
         tpp.incrementAction(currentStepIdx);
 
 
-        // Build rich page context — exploration summary + step context
-        const pageSummary = activeGraph._exploration?.llm_summary || '';
+        // Build rich page context — limit pageSummary to keep total prompt under 4096 tokens
+        const pageSummary = (activeGraph._exploration?.llm_summary || '').slice(0, 600);
         const contextualStep = [
-          `ORIGINAL GOAL: ${executorGoal}`,
-          `CURRENT STEP (${currentStepIdx + 1} of ${plan.steps.length}): ${currentStep}`,
-          `CURRENT URL: ${activeGraph.url}`,
-          `PAGE TITLE: ${activeGraph.title || 'Unknown'}`,
-          pageSummary ? `\n${pageSummary}` : `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`,
-          previousActions.length ? `\nRECENT ACTIONS:\n${previousActions.slice(-4).map(a => '  - ' + a).join('\n')}` : '',
+          `GOAL: ${executorGoal}`,
+          `STEP (${currentStepIdx + 1}/${plan.steps.length}): ${currentStep}`,
+          `URL: ${activeGraph.url}`,
+          `TITLE: ${activeGraph.title || 'Unknown'}`,
+          pageSummary || `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`,
+          previousActions.length ? `RECENT:\n${previousActions.slice(-3).map(a => '  - ' + a).join('\n')}` : '',
         ].filter(Boolean).join('\n');
 
         streamDiv = null;
@@ -781,6 +780,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
           appendAiMessage(`❌ ${agentResponse.args?.text || 'Error'}`);
           await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'executor', outcome: 'failure', detail: agentResponse.args?.text });
           isComplete = true; break;
+        }
+
+        // ── Hard catch: executor said "No action." — model is confused, force retry ──
+        const replyText2 = (agentResponse.args?.text || '').trim().toLowerCase();
+        if (agentResponse.tool === 'reply' && (replyText2 === 'no action.' || replyText2 === 'no action' || replyText2 === '')) {
+          previousActions.push(`You responded "No action." which is wrong — you MUST take a concrete browser action. Look at the current page elements and either: click a relevant link/button, type in a search box, or navigate to the right URL. Do NOT use reply unless you have real data to report.`);
+          await delay(500);
+          continue;
         }
 
         // ── Extract action details for observer ────────────────────────────
