@@ -615,10 +615,13 @@ Return ONLY a JSON array of question strings, nothing else.`;
     } catch (_) {
       return goal;
     }
-  }
+  } // end gatherMissingInfo
 
   // ─── TASK EXECUTION — called from TASK intent path AND chat escalation ─────
   async function handleTaskExecution(rawGoal) {
+  // Gather any missing info BEFORE planning — ask user simple questions
+  // if the task is underspecified (gatherMissingInfo was defined but never called)
+  rawGoal = await gatherMissingInfo(rawGoal);
 
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
   streamDiv = null;
@@ -692,13 +695,14 @@ Return ONLY a JSON array of question strings, nothing else.`;
   // In-memory element state — tracks typed/clicked without DOM re-extraction
   // Reset whenever URL changes (new page = fresh state)
   const elementState = new Map();
+  // Page diff engine — compare graph snapshots to detect real page movement
+  let prevSnapshot = null;
 
   while (!isComplete && currentStepIdx < plan.steps.length) {
     const currentStep = plan.steps[currentStepIdx];
     tpp.setStep(currentStepIdx);
     let actionCount = 0;
-    let lastActionFingerprint = '';   // for loop detection
-    let consecutiveSameAction = 0;   // how many times in a row the same action fired with no effect
+    let noChangedCount = 0; // actions with zero page diff = stall detection
 
     // ── Already-on-page check ──────────────────────────────────────────────
     // If this step says "open / navigate / go to X" and the browser is
@@ -732,11 +736,60 @@ Return ONLY a JSON array of question strings, nothing else.`;
         if (!wv) { await delay(1000); continue; } // webview not ready yet
         const urlBefore = wv.src || '';
 
+        // Snapshot BEFORE reading new DOM — captures pre-action state for diff
+        if (activeGraph) prevSnapshot = window.electronAPI.snapshotGraph
+          ? await window.electronAPI.snapshotGraph(activeGraph)
+          : { ids: new Set((activeGraph.elements||[]).map(e=>e.id)), title: activeGraph.title||'', url: activeGraph.url||'', vals: {}, textKey: '' };
+
         // ── ALWAYS refresh DOM before asking LLM what to do ──────────────
         await refreshActiveGraph(wv);
         if (!activeGraph) { appendAiMessage('⚠️ Cannot read page.'); break; }
 
+        // Diff: what changed since last action?
+        let diffBlock = '';
+        if (prevSnapshot) {
+          const currIds = new Set((activeGraph.elements||[]).map(e=>e.id));
+          const appeared = [...currIds].filter(id => !prevSnapshot.ids.has(id));
+          const removed  = [...prevSnapshot.ids].filter(id => !currIds.has(id));
+          const titleChg = prevSnapshot.title !== (activeGraph.title||'');
+          const urlChg   = prevSnapshot.url   !== (activeGraph.url||'');
+          const isEmpty  = appeared.length===0 && removed.length===0 && !titleChg && !urlChg;
+          if (isEmpty) {
+            noChangedCount++;
+          } else {
+            noChangedCount = 0; // reset stall counter — page moved
+            const lines = [];
+            if (appeared.length) lines.push(`+ appeared: ${appeared.slice(0,6).join(', ')}`);
+            if (removed.length)  lines.push(`- removed: ${removed.slice(0,6).join(', ')}`);
+            if (titleChg) lines.push(`~ title changed`);
+            if (urlChg)   lines.push(`~ URL changed`);
+            diffBlock = `PAGE DIFF (since last action):\n${lines.join('\n')}`;
 
+            // Auto-advance: if page moved and next step keywords match new page, advance
+            const nextStep = plan.steps[currentStepIdx + 1];
+            if (nextStep) {
+              const haystack = [(activeGraph.url||''), (activeGraph.title||''),
+                ...(activeGraph.elements||[]).filter(e=>e.id?.startsWith('TXT')).slice(0,8).map(e=>e.text||'')
+              ].join(' ').toLowerCase();
+              const STOP = new Set(['navigate','go','the','a','an','on','in','at','and','or','for','search','find','click','type','open','visit','is','are']);
+              const kws  = nextStep.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>3&&!STOP.has(w));
+              if (kws.length>0 && kws.filter(kw=>haystack.includes(kw)).length >= Math.ceil(kws.length*0.5)) {
+                appendAiMessage(`✓ Page moved — step done. Advancing to: ${nextStep}`);
+                tpp.stepDone(currentStepIdx);
+                currentStepIdx++;
+                previousActions = [`Step complete. Now on: ${activeGraph.title||activeGraph.url||'new page'}.`];
+                prevSnapshot = null;
+                isComplete = currentStepIdx >= plan.steps.length;
+                break;
+              }
+            }
+          }
+          // Stall: 3 actions, page never moved — trigger replan
+          if (noChangedCount >= 3) {
+            appendAiMessage('⚠️ Page not responding — replanning...');
+            break; // falls through to replan logic
+          }
+        }
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
@@ -765,7 +818,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
           `STEP (${currentStepIdx + 1}/${plan.steps.length}): ${currentStep}`,
           `URL: ${shortUrl}`,
           `TITLE: ${activeGraph.title || 'Unknown'}`,
-          pageSummary || `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`,
+          diffBlock || (pageSummary || `PAGE TYPE: ${activeGraph.semanticPattern || 'Unknown'}`),
           recentActions.length ? `RECENT:\n${recentActions.map(a => '  - ' + a).join('\n')}` : '',
         ].filter(Boolean).join('\n');
 
