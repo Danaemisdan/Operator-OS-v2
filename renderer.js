@@ -733,26 +733,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
         await refreshActiveGraph(wv);
         if (!activeGraph) { appendAiMessage('⚠️ Cannot read page.'); break; }
 
-        // ── Skill pipeline: skills run as a fast-path assist before the LLM.
-        //    They inject their result into previousActions as context.
-        //    The LLM executor ALWAYS runs after — it verifies, completes, or corrects.
-        //    Skills are helpers, never replacements for the agent's reasoning.
-        const stepSkill = await window.electronAPI.matchSkill(currentStep);
-        if (stepSkill && actionCount === 1) { // only assist on first action of a step
-          appendAiMessage(`⚡ **${stepSkill.name}** — pipeline assist`);
-          const wcId = wv?.getWebContentsId?.() || 0;
-          // Pass the STEP text (not the full user goal) so extractArgs pulls the right query
-          const skillResult = await window.electronAPI.executeSkill(stepSkill.id, currentStep, wcId, activeGraph || null);
-          if (skillResult?.success !== false) {
-            await delay(1000);
-            await refreshActiveGraph(wv);
-            const skillSummary = skillResult?.detail || skillResult?.message || `${stepSkill.name} completed`;
-            previousActions.push(`[Skill ${stepSkill.name} ran] → ${skillSummary}. Verify this is correct and continue.`);
-          } else {
-            previousActions.push(`[Skill ${stepSkill.name} failed] → Proceed manually.`);
-          }
-          // Always fall through to LLM executor — never break here
-        }
+
 
         const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
