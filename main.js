@@ -48,11 +48,26 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 app.whenReady().then(() => {
-  // Start the background GGUF inference server
-  console.log("Starting Local LLM Server...");
-  llmProcess = spawn('node', [path.join(__dirname, 'local-llm-server.js')], {
-     stdio: 'inherit'
+  // In packaged builds, __dirname is inside app.asar and 'node' doesn't exist.
+  // Use Electron's own Node runtime (process.execPath) and resolve paths via
+  // process.resourcesPath so the .gguf model and server script are found correctly.
+  const isPackaged = app.isPackaged;
+  const serverScript = isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'local-llm-server.js')
+    : path.join(__dirname, 'local-llm-server.js');
+  const modelPath = isPackaged
+    ? path.join(process.resourcesPath, 'Operator-engine-3b.gguf')
+    : path.join(__dirname, 'Operator-engine-3b.gguf');
+
+  console.log('[Main] Starting LLM server:', serverScript);
+  console.log('[Main] Model path:', modelPath);
+
+  llmProcess = spawn(process.execPath, ['--experimental-vm-modules', serverScript], {
+    stdio: 'inherit',
+    env: { ...process.env, OPERATOR_MODEL_PATH: modelPath, ELECTRON_RUN_AS_NODE: '1' }
   });
+  llmProcess.on('error', (err) => console.error('[Main] LLM server spawn error:', err));
+  llmProcess.on('exit', (code) => console.warn('[Main] LLM server exited with code:', code));
 
   createWindow();
 

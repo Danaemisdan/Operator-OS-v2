@@ -9,11 +9,14 @@ async function init() {
   console.log("[Local LLM Server] Initializing node-llama-cpp...");
   const { getLlama, LlamaChatSession } = await import('node-llama-cpp');
   llama = await getLlama();
-  
-  console.log("[Local LLM Server] Loading Operator-engine-3b.gguf...");
-  model = await llama.loadModel({
-    modelPath: path.join(__dirname, 'Operator-engine-3b.gguf')
-  });
+
+  // Use env var set by main.js (works in packaged builds on all platforms)
+  // Falls back to __dirname for dev mode
+  const modelPath = process.env.OPERATOR_MODEL_PATH
+    || path.join(__dirname, 'Operator-engine-3b.gguf');
+
+  console.log("[Local LLM Server] Loading model from:", modelPath);
+  model = await llama.loadModel({ modelPath });
   
   console.log("[Local LLM Server] Creating context (2048 tokens, 4 threads)...");
   context = await model.createContext({

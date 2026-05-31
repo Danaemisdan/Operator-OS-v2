@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:win": "electron-builder --win zip --x64"
+    "build:win": "electron-builder --win dir --x64"
   },
   "repository": {
     "type": "git",
@@ -26,11 +26,11 @@
     "asar": true,
     "files": [
       "**/*",
+      "!Operator-engine-3b.gguf",
       "!node_modules/@node-llama-cpp/mac-*/**",
       "!node_modules/@reflink/reflink-darwin-*/**",
       "!node_modules/iconv-corefoundation/**",
       "!**/*.map",
-      "!**/*.md",
       "!.git/**",
       "!dist/**",
       "!scratch_*"
@@ -44,7 +44,7 @@
     "win": {
       "target": [
         {
-          "target": "zip",
+          "target": "dir",
           "arch": ["x64"]
         }
       ]
@@ -58,6 +58,8 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
+    "@node-llama-cpp/win-x64": "^3.18.1",
+    "@node-llama-cpp/win-x64-cuda": "^3.18.1",
     "node-llama-cpp": "^3.18.1"
   }
 }
