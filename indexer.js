@@ -189,6 +189,9 @@
       const node = c.node;
       const rect = c.rect;
       
+      // Inject data-op-id so the executor can reliably find this exact element later
+      try { node.setAttribute('data-op-id', id); } catch(_) {}
+      
       // Clean non-intrusive box overlay
       const box = document.createElement('div');
       box.className = 'op-bounding-box';
@@ -204,27 +207,6 @@
       box.style.zIndex = '2147483646';
       fragment.appendChild(box);
       
-      const label = document.createElement('div');
-      label.className = 'op-text-label';
-      const _emojiInputT = (node.getAttribute('type') || '').toLowerCase();
-      const _isTypeableInput = (node.tagName === 'INPUT' && !['submit','button','reset','image','checkbox','radio'].includes(_emojiInputT)) || node.tagName === 'TEXTAREA';
-      label.innerText = `${id} ${node.tagName === 'IMG' ? '🖼️' : (_isTypeableInput ? '✍️' : '🖱️')}`;
-      label.style.position = 'absolute';
-      label.style.background = '#3b82f6';
-      label.style.color = 'white';
-      label.style.fontSize = '11px';
-      label.style.fontWeight = 'bold';
-      label.style.fontFamily = 'Inter, sans-serif';
-      label.style.padding = '2px 4px';
-      label.style.borderRadius = '4px';
-      label.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
-      label.style.zIndex = '2147483647';
-      label.style.pointerEvents = 'none';
-      label.style.whiteSpace = 'nowrap';
-      label.style.top = `${Math.max(0, rect.top + scrollTop - 20)}px`;
-      label.style.left = `${Math.max(0, rect.left + scrollLeft - 4)}px`;
-      fragment.appendChild(label);
-      
       // Smart label extraction — prioritises accessible label over raw innerText
       // so icon-only buttons and SVG-icon buttons get proper names
       const ariaLbl = node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '';
@@ -234,8 +216,34 @@
       const classHint = typeof node.className === 'string' && node.className.match(/(search|close|menu|settings|profile|cart|user)/i) ? node.className.match(/(search|close|menu|settings|profile|cart|user)/i)[0] : '';
       const innerTxt = (node.innerText || '').trim().replace(/\n/g,' ').replace(/\s+/g,' ').substring(0, 80);
       const altTxt   = node.alt || '';
+      
       // Prefer: aria-label > title > innerText > placeholder > child image alt > class hint > alt
       const text = (ariaLbl || titleLbl || innerTxt || svgTitle || childAlt || classHint || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
+
+      const label = document.createElement('div');
+      label.className = 'op-text-label';
+      const _emojiInputT = (node.getAttribute('type') || '').toLowerCase();
+      const _isTypeableInput = (node.tagName === 'INPUT' && !['submit','button','reset','image','checkbox','radio'].includes(_emojiInputT)) || node.tagName === 'TEXTAREA';
+      
+      // Improve the visual label to show the actual text so the user isn't blind
+      const displayTxt = text ? text.substring(0, 20) + (text.length > 20 ? '...' : '') : '';
+      label.innerText = `${id} ${node.tagName === 'IMG' ? '🖼️' : (_isTypeableInput ? '✍️' : '🖱️')} ${displayTxt}`;
+      label.style.position = 'absolute';
+      label.style.background = 'rgba(59, 130, 246, 0.9)';
+      label.style.color = 'white';
+      label.style.fontSize = '10px';
+      label.style.fontWeight = '500';
+      label.style.fontFamily = 'Inter, sans-serif';
+      label.style.padding = '1px 3px';
+      label.style.borderRadius = '3px';
+      label.style.boxShadow = '0 1px 2px rgba(0,0,0,0.2)';
+      label.style.zIndex = '2147483647';
+      label.style.pointerEvents = 'none';
+      label.style.whiteSpace = 'nowrap';
+      label.style.top = `${Math.max(0, rect.top + scrollTop - 16)}px`;
+      label.style.left = `${Math.max(0, rect.left + scrollLeft - 2)}px`;
+      fragment.appendChild(label);
+      
       let parent = node.parentElement;
       let parentContext = '';
       let depth = 0;

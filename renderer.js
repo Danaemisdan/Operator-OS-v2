@@ -1105,7 +1105,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
                 action: 'execute_js',
                 payload: { code: `
                   (() => {
-                    const el = document.elementFromPoint(${x}, ${y});
+                    const el = document.querySelector('[data-op-id="${targetId}"]');
                     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
                       el.value = '';
                       el.dispatchEvent(new Event('input', { bubbles: true }));

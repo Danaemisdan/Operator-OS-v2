@@ -252,16 +252,16 @@ ${taskScratchpad || '(empty - write notes to yourself if needed)'}
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
-{"tool":"query_graph","args":{"type":"inputs|buttons|links|text","zone":"<optional zone name>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"navigate","args":{"text":"<full URL>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"click","args":{"targetId":"<element ID from the list above>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"type","args":{"targetId":"<element ID>","text":"<words to type>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"press_enter","args":{},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"scroll","args":{"text":"down"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"ask_user","args":{"text":"<question>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"scratchpad","args":{"text":"<notes>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"extract_data","args":{"question":"<what info>","targetId":"<OPTIONAL ID>"},"expectation":"<what you expect this to do>","status":"running"}
-{"tool":"reply","args":{"text":"<answer>"},"expectation":"<what you expect this to do>","status":"complete"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"query_graph","args":{"type":"inputs|buttons|links|text","zone":"<optional zone name>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"type","args":{"targetId":"<element ID>","text":"<words to type>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"press_enter","args":{},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"scroll","args":{"text":"down"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"ask_user","args":{"text":"<question>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"scratchpad","args":{"text":"<notes>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"extract_data","args":{"question":"<what info>","targetId":"<OPTIONAL ID>"},"status":"running"}
+{"thought":"<reasoning>","expectation":"<what you expect>","tool":"reply","args":{"text":"<answer>"},"status":"complete"}
 
 RULES:
 1. Output ONLY the raw JSON. No markdown blocks, no prose, no chat. Begin with {.
