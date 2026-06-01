@@ -1052,9 +1052,37 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         } else if (action === 'extract_data') {
           const question = args.question || 'Extract the top results, prices, and relevant details';
-          msg += `<br>📊 Extracting data for: <em>${question}</em>`;
+          const targetId = (args.targetId || '').trim();
+          let pageText = '';
+          
+          if (targetId) {
+            msg += `<br>📊 Extracting localized data for: <em>${question}</em> from <code>${targetId}</code>`;
+            const el = activeGraph.elements.find(e => e.id === targetId);
+            if (el && el.position) {
+              const x = Math.round(el.position.x + el.position.width / 2);
+              const y = Math.round(el.position.y + el.position.height / 2);
+              const localizedText = await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'execute_js',
+                payload: { code: `
+                  (() => {
+                    const el = document.elementFromPoint(${x}, ${y});
+                    if (!el) return '';
+                    const container = el.closest('article, li, section, tr, [class*="card"], [class*="item"], [class*="product"]');
+                    return (container || el).innerText;
+                  })();
+                `}
+              });
+              pageText = localizedText || el.text || el.value || '';
+            } else {
+              pageText = `Target ${targetId} not found on screen.`;
+            }
+          } else {
+            msg += `<br>📊 Extracting global data for: <em>${question}</em>`;
+            pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 10000);
+          }
+          
           appendAiMessage(msg);
-          const pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 10000);
           const extPrompt = `Extract data from the PAGE TEXT answering this question: "${question}"\nReturn ONLY the extracted data as concise text, or "Not found" if the data is not on the page.\n\nPAGE TEXT:\n${pageText}`;
           // Use chatAgentWithLLM to do the extraction locally
           const extractedResponse = await window.electronAPI.agentChat(extPrompt, {}, [], memory, []);
