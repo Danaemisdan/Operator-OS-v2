@@ -130,8 +130,24 @@
       } else {
         return;
       }
-      
-      candidates.push({ node, rect, prefix, priority, area: rect.width * rect.height, shouldDiscard: false });
+      // --- Spatial DOM Grouping ---
+      let zone = 'Main Content';
+      const container = node.closest('nav, header, footer, aside, main, form');
+      if (container) {
+         const t = container.tagName;
+         if (t === 'NAV') zone = 'Navigation';
+         else if (t === 'HEADER') zone = 'Header';
+         else if (t === 'FOOTER') zone = 'Footer';
+         else if (t === 'ASIDE') zone = 'Sidebar';
+         else if (t === 'FORM') zone = 'Form Area';
+         else if (t === 'MAIN') zone = 'Main Content';
+      } else {
+         // Fallbacks based on position
+         if (rect.top < window.innerHeight * 0.15) zone = 'Header Area';
+         else if (rect.bottom > window.innerHeight * 0.9) zone = 'Footer Area';
+      }
+
+      candidates.push({ node, rect, prefix, priority, area: rect.width * rect.height, zone, shouldDiscard: false });
     });
 
     let filtered = [];

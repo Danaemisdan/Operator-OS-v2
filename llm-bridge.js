@@ -153,12 +153,9 @@ function analyzeUIWithLLM(graph) {
 // ─── Main Agent Chat (with full conversation history for chat mode) ────────────
 // pageSummary: pre-computed heuristic llm_summary from explorePage() — use this
 // instead of raw elements when available. Shorter prompt = faster inference.
-async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '') {
+async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '', taskScratchpad = '') {
   // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
   const isChatMode = !graph.elements || graph.elements.length === 0;
-
-  // Build page context — prefer pre-computed heuristic summary (instant, compact)
-  // over rebuilding from raw elements (slow, noisy)
   let pageContext = '';
   const hasPage = graph.url || (graph.elements && graph.elements.length > 0);
   if (hasPage) {
@@ -189,19 +186,27 @@ ${pageSummary}`;
           overlayEls.map(e => `  [${e.id}] "${e.text || e.placeholder}" — closes/dismisses this overlay`).join('\n') + '\n'
         : '';
 
-      // ── Build element list with state + header zone hints ─────────────────
-      // No cap on count — model needs to see the full action space
-      const elLines = interactiveEls.slice(0, 30).map(e => {
-        const label = (e.text || e.placeholder || '').substring(0, 50);
-        // In-memory state — typed value or clicked flag injected by renderer
-        const st = e._state;
-        const stateStr = st?.typed  ? ` [✓ FILLED: "${st.value}"]` :
-                         st?.clicked ? ` [✓ CLICKED]` : '';
-        // Current DOM value (if not overridden by state)
-        const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
-        const desc = e.predictedEffect || e._exploration?.purpose || e.role || '';
-        return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}`;
-      }).join('\n');
+      // ── Build element list grouped by Zone ─────────────────
+      // Group elements
+      const zones = {};
+      interactiveEls.slice(0, 40).forEach(e => {
+        const z = e.zone || 'Main Content';
+        if (!zones[z]) zones[z] = [];
+        zones[z].push(e);
+      });
+
+      const elLines = Object.entries(zones).map(([zoneName, els]) => {
+        const zoneEls = els.map(e => {
+          const label = (e.text || e.placeholder || '').substring(0, 50);
+          const st = e._state;
+          const stateStr = st?.typed  ? ` [✓ FILLED: "${st.value}"]` :
+                           st?.clicked ? ` [✓ CLICKED]` : '';
+          const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
+          const desc = e.predictedEffect || e._exploration?.purpose || e.role || '';
+          return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}`;
+        }).join('\n');
+        return `[${zoneName}]\n${zoneEls}`;
+      }).join('\n\n');
 
       pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
@@ -225,15 +230,21 @@ SITUATION:
 ${pageContext}
 ${memory ? `\nMEMORY: ${memory}` : ''}
 ${(() => { try { const keys = memoryStore.listVariableKeys(); return keys.length > 0 ? `USER HAS: ${keys.join(', ')} — use these when logging in or filling forms, DO NOT ask user for them` : ''; } catch(_) { return ''; } })()}
-RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-2).join(' │ ')}
+WORKING MEMORY SCRATCHPAD:
+${taskScratchpad || '(empty - write notes to yourself if needed)'}
+
+RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
 {"tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
-{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type, NOT this placeholder>"},"status":"running"}
+{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>"},"status":"running"}
 {"tool":"press_enter","args":{},"status":"running"}
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
 {"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
+{"tool":"scratchpad","args":{"text":"<notes about what you have tried, what failed, or what to do next>"},"status":"complete"}
+{"tool":"dismiss_popups","args":{},"status":"complete"}
+{"tool":"extract_data","args":{"schema":"<what data to extract>"},"status":"complete"}
 {"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
 
 RULES:

@@ -144,7 +144,7 @@ ipcMain.handle('analyze-ui-llm', async (event, graph) => {
   }
 });
 
-ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, memory, conversationHistory, pageSummary }) => {
+ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, memory, conversationHistory, pageSummary, taskScratchpad }) => {
   try {
     const result = await chatAgentWithLLM(
       prompt,
@@ -154,7 +154,8 @@ ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, mem
       memory || '',
       conversationHistory || [],
       false,
-      pageSummary || ''
+      pageSummary || '',
+      taskScratchpad || ''
     );
     return result;
   } catch (error) {
@@ -406,6 +407,12 @@ ipcMain.handle('execute-action', async (event, actionParams) => {
     const { url } = payload;
     wc.downloadURL(url);
     return true;
+  }
+
+  if (action === 'execute_js') {
+    const { code } = payload;
+    const res = await wc.executeJavaScript(code).catch(e => e.message);
+    return res;
   }
 
   throw new Error(`Unknown action: ${action}`);

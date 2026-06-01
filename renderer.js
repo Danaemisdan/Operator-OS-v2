@@ -375,6 +375,7 @@ btnNewTab.addEventListener('click', () => {
 // Rolling conversation history — persists across chat turns so model has full context
 const conversationHistory = [];
 const MAX_HISTORY_TURNS = 20; // keep last 20 role pairs
+let taskScratchpad = "";
 
 function pushToHistory(userMsg, assistantMsg) {
   conversationHistory.push({ role: 'user', content: userMsg });
@@ -652,6 +653,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
   async function handleTaskExecution(rawGoal) {
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
   // (questions handled by planner: LLM + deterministic pattern fallback)
+  let taskScratchpad = '';
   streamDiv = null;
   // Pass current page state so planner generates specific, contextual steps
   const wv0 = getActiveWebview();
@@ -889,7 +891,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         streamDiv = null;
         const agentResponse = await window.electronAPI.agentChat(
-          contextualStep, annotatedGraph, previousActions, memory, []
+          contextualStep, annotatedGraph, previousActions, memory, [], taskScratchpad
         );
         streamDiv = null;
 
@@ -1034,6 +1036,46 @@ Return ONLY a JSON array of question strings, nothing else.`;
           researchDiv = null;
           await window.electronAPI.startResearch(args.text);
           previousActions.push(`Expectation: "${expectation}". Outcome: Researched: ${args.text}`);
+          continue;
+
+        } else if (action === 'scratchpad') {
+          const note = args.text || '';
+          msg += `<br>📝 Note to self: <em>${note}</em>`;
+          appendAiMessage(msg);
+          taskScratchpad += `- ${note}\n`;
+          previousActions.push(`Wrote to scratchpad: "${note}"`);
+          continue;
+
+        } else if (action === 'dismiss_popups') {
+          msg += `<br>🛡️ Auto-dismissing overlays...`;
+          appendAiMessage(msg);
+          await window.electronAPI.executeAction({
+            webContentsId: wv.getWebContentsId(),
+            action: 'execute_js',
+            payload: { code: `
+              const dismissWords = /(accept|agree|got it|close|dismiss|no thanks|reject|allow)/i;
+              document.querySelectorAll('button, [role="button"], a').forEach(el => {
+                if (dismissWords.test(el.textContent) && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0) {
+                   try { el.click(); } catch(e){}
+                }
+              });
+            `}
+          });
+          await delay(1500);
+          await refreshActiveGraph(wv);
+          previousActions.push(`Executed auto-dismiss for popups. Assume overlays are cleared.`);
+          continue;
+
+        } else if (action === 'extract_data') {
+          msg += `<br>📊 Extracting data matching: <em>${args.schema}</em>`;
+          appendAiMessage(msg);
+          const extPrompt = `Extract data matching this schema: "${args.schema}"\nReturn ONLY the extracted data as concise text, or "Not found".\n\nPAGE TEXT:\n${textContent.substring(0, 10000)}`;
+          // Use chatAgentWithLLM to do the extraction locally
+          const extractedResponse = await window.electronAPI.agentChat(extPrompt, {}, [], memory, []);
+          const extResult = extractedResponse.args?.text || JSON.stringify(extractedResponse);
+          previousActions.push(`Extracted data for schema "${args.schema}": ${extResult.substring(0, 500)}`);
+          msg += `<br>✅ Extracted: ${extResult.substring(0, 100)}...`;
+          appendAiMessage(msg);
           continue;
 
         } else if (action === 'click' || action === 'type') {
