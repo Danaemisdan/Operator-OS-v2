@@ -306,7 +306,7 @@
         hrefRaw:     node.getAttribute('href') || '',
         placeholder: node.placeholder || node.getAttribute('placeholder') || '',
         name:        node.getAttribute('name') || '',
-        value:       (node.tagName === 'INPUT' || node.tagName === 'BUTTON') ? (node.value || node.getAttribute('value') || '') : '',
+        value:       (node.tagName === 'INPUT' || node.tagName === 'BUTTON' || node.tagName === 'TEXTAREA') ? (node.value || node.getAttribute('value') || '') : '',
         ariaLabel:   node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '',
         role:        node.getAttribute('role') || node.tagName.toLowerCase(),
         src:         node.src || node.currentSrc || '',
