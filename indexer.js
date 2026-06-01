@@ -23,6 +23,8 @@
   function isVisible(node, rect) {
     if (rect.width < 5 || rect.height < 5) return false;
     
+    if (node.getAttribute('aria-hidden') === 'true') return false;
+    
     // Completely out of bounds (offscreen elements like Skip Navigation)
     if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) return false;
     

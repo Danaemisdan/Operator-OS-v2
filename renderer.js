@@ -653,8 +653,6 @@ Return ONLY a JSON array of question strings, nothing else.`;
   async function handleTaskExecution(rawGoal) {
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
   // (questions handled by planner: LLM + deterministic pattern fallback)
-  // Start fresh Task Progress Panel
-  tpp.show(executorGoal);
   let taskScratchpad = '';
   let memorypad = '';
   streamDiv = null;
@@ -714,6 +712,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
   // Inject research results into the goal context for the executor
   const executorGoal = researchContext ? enrichedGoal + researchContext : enrichedGoal;
+  // Start fresh Task Progress Panel
+  tpp.show(executorGoal);
 
   const planHtml = plan.steps.map(s => `<li>${s}</li>`).join('');
   appendAiMessage(`📋 **Plan:**<ol style="margin:8px 0 0 16px;padding:0">${planHtml}</ol>`);
@@ -1495,8 +1495,9 @@ function updateDashboardLive(graph) {
     }
     
     let predHtml = '';
-    if (el.predictedEffect) {
-       predHtml = `<div style="color: #a855f7; font-size: 0.8rem; margin-top: 4px; border-top: 1px dashed rgba(168, 85, 247, 0.3); padding-top: 4px;"><i data-lucide="zap" style="width: 12px; height: 12px; display: inline-block; vertical-align: -2px;"></i> ${el.predictedEffect}</div>`;
+    const intentText = el.semanticIntent || el.predictedEffect;
+    if (intentText) {
+       predHtml = `<div style="color: #a855f7; font-size: 0.8rem; margin-top: 4px; border-top: 1px dashed rgba(168, 85, 247, 0.3); padding-top: 4px;"><i data-lucide="zap" style="width: 12px; height: 12px; display: inline-block; vertical-align: -2px;"></i> ${intentText}</div>`;
     }
     
     html += `<div style="background: rgba(255,255,255,0.02); border: 1px solid #27272a; padding: 12px; border-radius: 8px;">

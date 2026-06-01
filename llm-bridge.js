@@ -104,8 +104,11 @@ function analyzeUIWithLLM(graph) {
         // Icon-only button — use context clues
         if (hrefPath.includes('close') || hrefPath.includes('dismiss')) {
           predictions[el.id] = `Close / dismiss button`;
+        } else if (hrefPath && hrefPath !== '/' && hrefPath !== '#') {
+          const pathSegments = hrefPath.replace(/[^a-zA-Z0-9-]/g, ' ').trim();
+          predictions[el.id] = pathSegments ? `Action button related to: ${pathSegments.substring(0, 30)}` : `Interactive icon button`;
         } else {
-          predictions[el.id] = `Unlabelled button (icon only)`;
+          predictions[el.id] = `Interactive icon button`;
         }
         return;
       }
