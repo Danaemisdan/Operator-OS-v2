@@ -234,7 +234,7 @@ RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join
 AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
 {"tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
-{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>","submit_after": "<true/false (use true for search boxes and chat boxes to hit Enter immediately)>"},"status":"running"}
+{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>"},"status":"running"}
 {"tool":"press_enter","args":{},"status":"running"}
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
 {"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
@@ -244,7 +244,7 @@ AVAILABLE ACTIONS — respond with exactly one JSON object:
 
 RULES:
 1. Output ONLY the raw JSON. No markdown blocks, no prose, no chat. Begin with {.
-2. GENERAL COGNITIVE LOOP: Use extract_data selectively when you need to gather facts, compare items, or read long text. To read a specific item, pass its targetId. Store findings in your scratchpad.
+2. GENERAL COGNITIVE LOOP: Before using extract_data, VERIFY you are on the correct destination page (check the URL and Title). Do not prematurely extract data from intermediate states like homepages or autocomplete dropdowns. Use extract_data selectively when you need to gather facts, compare items, or read long text.
 3. DO NOT randomly click list items without comparing them in your scratchpad first.
 4. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
 5. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
