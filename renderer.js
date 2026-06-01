@@ -1111,17 +1111,20 @@ Return ONLY a JSON array of question strings, nothing else.`;
                 payload: { x, y }
               });
               await delay(200);
-              // Step 2: Select all existing text (Cmd+A on Mac) and delete to clear it
+              // Step 2: Reliably clear the input field via JS before typing
               await window.electronAPI.executeAction({
                 webContentsId: wv.getWebContentsId(),
-                action: 'keyboard_shortcut',
-                payload: { modifiers: ['meta'], keyCode: 'a' }
-              });
-              await delay(100);
-              await window.electronAPI.executeAction({
-                webContentsId: wv.getWebContentsId(),
-                action: 'keyboard_shortcut',
-                payload: { modifiers: [], keyCode: 'Backspace' }
+                action: 'execute_js',
+                payload: { code: `
+                  (() => {
+                    const el = document.elementFromPoint(${x}, ${y});
+                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                      el.value = '';
+                      el.dispatchEvent(new Event('input', { bubbles: true }));
+                      el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                  })();
+                `}
               });
               await delay(100);
               // Step 3: Type the new text

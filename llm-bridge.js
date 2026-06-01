@@ -247,13 +247,13 @@ AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
 
 RULES:
-1. Output ONLY the JSON. Nothing before or after.
+1. Output ONLY the raw JSON. No markdown blocks, no prose, no chat. Begin with {.
 2. GENERAL COGNITIVE LOOP: Use extract_data selectively when you need to gather facts, compare items, or read long text. To read a specific item, pass its targetId. Store findings in your scratchpad.
 3. SEARCH ENGINES: If you are on a search homepage (Google, etc.) and have not searched yet, your ONLY action is to type your query. Do NOT use extract_data on an empty search page.
 4. DO NOT randomly click list items without comparing them in your scratchpad first.
-4. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
-5. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
-6. Only use reply when the answer/content is actually visible on screen or in your scratchpad.`;
+5. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
+6. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
+7. Only use reply when the answer/content is actually visible on screen or in your scratchpad.`;
 
   const messages = isChatMode
     ? [
@@ -263,7 +263,7 @@ RULES:
       ]
     : [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Goal: ${promptText}` },
+        { role: 'user', content: `SITUATION & GOAL:\n${promptText}\n\nReturn EXACTLY ONE raw JSON action object starting with '{'. Do NOT write prose. No markdown blocks. Your entire response MUST be parsable by JSON.parse().` },
       ];
 
   return new Promise((resolve) => {
