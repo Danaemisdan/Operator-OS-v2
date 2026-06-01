@@ -168,11 +168,8 @@ ${pageSummary}`;
     } else {
       // Fallback: build from raw elements — annotated with in-memory state and position
       const els = graph.elements || [];
-      const textContent = els
-        .filter(e => e.id && e.id.startsWith('TXT') && e.text && e.text.length > 2 && e.text.length < 150)
-        .slice(0, 8).map(e => e.text.trim()).join(' | ');
       const interactiveEls = els.filter(e =>
-        e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK'))
+        e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK') || (e.id.startsWith('TXT') && e.text && e.text.length > 1))
       );
 
       // ── Overlay / popup detection ────────────────────────────────────────
@@ -189,7 +186,7 @@ ${pageSummary}`;
       // ── Build element list grouped by Zone ─────────────────
       // Group elements
       const zones = {};
-      interactiveEls.slice(0, 40).forEach(e => {
+      interactiveEls.slice(0, 120).forEach(e => {
         const z = e.zone || 'Main Content';
         if (!zones[z]) zones[z] = [];
         zones[z].push(e);
@@ -211,9 +208,8 @@ ${pageSummary}`;
       pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
-- Page type: ${graph.semanticPattern || 'Unknown'}
-- Visible text: ${textContent || '(none)'}${overlayBlock}
-- Interactive elements (${interactiveEls.length}):
+- Page type: ${graph.semanticPattern || 'Unknown'}${overlayBlock}
+- Visible elements (${interactiveEls.length}):
 ${elLines}`;
     }
   }
