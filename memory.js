@@ -121,17 +121,22 @@ function recallRelevant(goal, url) {
   const scored = mem.episodes.map((ep) => {
     let score = 0;
 
-    // Domain match
-    try {
-      if (new URL(ep.url).hostname === currentDomain) score += 5;
-    } catch (e) {
-      if (ep.url === url) score += 5;
-    }
-
-    // Goal word overlap
+    // Goal word overlap — REQUIRED. Domain match alone is not enough.
+    // An episode must share at least one significant word with the current goal.
     const epGoalLower = (ep.goal || '').toLowerCase();
+    let goalOverlap = 0;
     for (const word of goalWords) {
-      if (epGoalLower.includes(word)) score += 2;
+      if (epGoalLower.includes(word)) goalOverlap += 2;
+    }
+    // If zero word overlap with current goal, this memory is irrelevant — skip entirely
+    if (goalOverlap === 0) return { ep, score: -1 };
+    score += goalOverlap;
+
+    // Domain match is a tiebreaker, not the primary signal
+    try {
+      if (new URL(ep.url).hostname === currentDomain) score += 1;
+    } catch (e) {
+      if (ep.url === url) score += 1;
     }
 
     // Slight preference for successful episodes

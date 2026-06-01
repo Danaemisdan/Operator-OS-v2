@@ -731,6 +731,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
   const elementState = new Map();
   // Page diff engine — compare graph snapshots to detect real page movement
   let prevSnapshot = null;
+  // Repetition loop breaker — tracks last action to detect parrot mode
+  let lastActionSignature = null;
 
   while (!isComplete && currentStepIdx < plan.steps.length) {
     const currentStep = plan.steps[currentStepIdx];
@@ -881,6 +883,20 @@ Return ONLY a JSON array of question strings, nothing else.`;
           await window.electronAPI.recordMemory({ goal: currentStep, url: activeGraph.url, action: 'executor', outcome: 'failure', detail: agentResponse.args?.text });
           isComplete = true; break;
         }
+
+        // ── Repetition loop breaker ───────────────────────────────────────────
+        // If the agent proposes the exact same action twice in a row, it's stuck in parrot mode.
+        // Wipe its short-term history so it re-perceives the page with fresh eyes.
+        const thisActionSig = `${agentResponse.tool}::${agentResponse.args?.targetId || agentResponse.args?.text || ''}`;
+        if (thisActionSig === lastActionSignature && agentResponse.tool !== 'scroll') {
+          previousActions = []; // wipe stale context
+          lastActionSignature = null;
+          previousActions.push(`LOOP DETECTED: You just tried "${agentResponse.tool}" with the same target twice. Re-read the current page state carefully and choose a different action.`);
+          tpp.setThought('⚠️ Loop detected — clearing memory and retrying');
+          await delay(300);
+          continue;
+        }
+        lastActionSignature = thisActionSig;
 
         // ── Hard catch: executor gave a non-meaningful reply (confused model) ──
         const replyTxt = (agentResponse.args?.text || '').trim().toLowerCase();

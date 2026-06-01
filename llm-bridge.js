@@ -202,59 +202,47 @@ ${pageSummary}`;
          }
          interactiveEls = interactiveEls.slice(0, 150); // Generous limit for targeted queries
       } else {
-         // Smart Auto-Query System
+         // Pure Semantic Relevance Scoring — no element type boosting
+         // Score every element purely on word overlap between its label/intent and the current step
          let currentStepText = '';
          const stepMatch = promptText.match(/STEP \(\d+\/\d+\):\s*(.*)/);
          if (stepMatch) currentStepText = stepMatch[1].toLowerCase();
 
          if (currentStepText) {
-           const isSearch = currentStepText.includes('search') || currentStepText.includes('find') || currentStepText.includes('query');
-           const isAuth = currentStepText.includes('log in') || currentStepText.includes('login') || currentStepText.includes('sign in');
-           const isBuy = currentStepText.includes('buy') || currentStepText.includes('cart') || currentStepText.includes('checkout');
-           
+           // Extract meaningful words from the step (filter out stop words and action verbs)
+           const STOP_WORDS = new Set(['navigate','click','type','find','search','open','go','the','and','for','into','then','with','from','that','this','will','should','need','make','take','use','get']);
+           const stepWords = currentStepText
+             .replace(/[^a-z0-9 ]/g, '')
+             .split(' ')
+             .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+
            interactiveEls = interactiveEls.map(e => {
              let score = 0;
-             const tLower = (e.text || '').toLowerCase();
-             const pContextLower = (e.parentContext || '').toLowerCase();
-             const sIntent = (e.semanticIntent || '').toLowerCase();
-             const type = e.id.substring(0, 3);
-             
-             // Boost based on step intent
-             if (isSearch) {
-               if (type === 'INP' && (tLower.includes('search') || pContextLower.includes('search') || sIntent.includes('search'))) score += 50;
-               if (type === 'BTN' && (tLower.includes('search') || sIntent.includes('search'))) score += 30;
-             }
-             if (isAuth) {
-               if (type === 'INP' && (tLower.includes('email') || tLower.includes('password') || sIntent.includes('auth'))) score += 50;
-               if ((type === 'BTN' || type === 'LNK') && (tLower.includes('sign in') || tLower.includes('log in') || sIntent.includes('auth'))) score += 50;
-             }
-             if (isBuy) {
-               if (type === 'BTN' && (tLower.includes('cart') || tLower.includes('buy') || tLower.includes('checkout') || sIntent.includes('cart'))) score += 50;
-             }
-             
-             // Word overlap matching
-             const stepWords = currentStepText.replace(/[^a-z0-9 ]/g, '').split(' ').filter(w => w.length > 3 && !['navigate','click','type'].includes(w));
+             const tLower = (e.text || e.placeholder || '').toLowerCase();
+             const sIntent = (e.semanticIntent || e.predictedEffect || '').toLowerCase();
+             const parentCtx = (e.parentContext || '').toLowerCase();
+
+             // Overlay always gets highest priority — dismiss before anything else
+             if (e.isOverlay) return { ...e, _smartScore: 200 };
+
+             // Pure word overlap scoring
              stepWords.forEach(w => {
-               if (tLower.includes(w)) score += 20;
-               if (sIntent.includes(w)) score += 10;
+               if (tLower.includes(w))    score += 25; // direct text match
+               if (sIntent.includes(w))   score += 15; // semantic intent match
+               if (parentCtx.includes(w)) score += 5;  // parent context match
              });
 
-             // Base weights for interactive potential
-             if (type === 'INP') score += 15;
-             if (type === 'BTN') score += 10;
-             if (type === 'LNK') score += 5;
-             if (e.isOverlay) score += 40; // High priority to dismiss popups
-             
+             // Filled fields are always highly relevant (agent needs to know what's typed)
+             if (e._state?.typed) score += 30;
+
              return { ...e, _smartScore: score };
            });
-           
-           // Sort by score descending and take top 25, then clean up
+
            interactiveEls = interactiveEls
              .sort((a, b) => b._smartScore - a._smartScore)
              .slice(0, 25)
              .map(e => { delete e._smartScore; return e; });
          } else {
-           // Default Overview
            interactiveEls = interactiveEls.slice(0, 30);
          }
       }
@@ -300,7 +288,7 @@ ${elLines}`;
 
 SITUATION:
 ${pageContext}
-${memory ? `\nMEMORY: ${memory}` : ''}
+${memory ? `\n--- PAST EXPERIENCE (historical reference only — this is NOT the current task or current page state) ---\n${memory}\n--- END PAST EXPERIENCE ---` : ''}
 ${(() => { try { const keys = memoryStore.listVariableKeys(); return keys.length > 0 ? `USER HAS: ${keys.join(', ')} — use these when logging in or filling forms, DO NOT ask user for them` : ''; } catch(_) { return ''; } })()}
 WORKING MEMORY SCRATCHPAD:
 ${taskScratchpad || '(empty - write notes to yourself if needed)'}
@@ -308,7 +296,7 @@ ${taskScratchpad || '(empty - write notes to yourself if needed)'}
 LARGE DATA MEMORYPAD (For extracted content):
 ${memorypad || '(empty)'}
 
-RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
+RECENT ACTIONS (last 3 steps in this session): ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"thought":"<reasoning>","expectation":"<what you expect>","tool":"query_graph","args":{"type":"inputs|buttons|links|text","zone":"<optional zone name>"},"status":"running"}

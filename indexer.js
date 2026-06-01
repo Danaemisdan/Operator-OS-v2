@@ -176,6 +176,26 @@
         filtered.push(child);
       }
     }
+
+    // PASS 2: Wrapper Pruning
+    // If a BTN or LNK element contains real interactive children (other BTN/LNK/INP),
+    // the wrapper itself is not meaningful — it's just a container that absorbed all their text.
+    // Discard the wrapper. The children are the real elements.
+    const filteredPass2 = [];
+    for (let i = 0; i < filtered.length; i++) {
+      const el = filtered[i];
+      if (el.prefix === 'BTN' || el.prefix === 'LNK') {
+        const hasInteractiveChild = filtered.some((other, j) => {
+          if (j === i) return false;
+          if (other.prefix !== 'BTN' && other.prefix !== 'LNK' && other.prefix !== 'INP') return false;
+          // Check if el.node contains other.node
+          return el.node !== other.node && el.node.contains(other.node);
+        });
+        if (hasInteractiveChild) continue; // Skip this wrapper
+      }
+      filteredPass2.push(el);
+    }
+    const filtered2 = filteredPass2;
     
     const elements = [];
     let counters = { BTN: 0, INP: 0, LNK: 0, IMG: 0, VID: 0, TXT: 0, ELM: 0 };
@@ -185,7 +205,7 @@
     
     const fragment = document.createDocumentFragment();
     
-    filtered.forEach(c => {
+    filtered2.forEach(c => {
       counters[c.prefix]++;
       const id = `${c.prefix}_${String(counters[c.prefix]).padStart(3, '0')}`;
       const node = c.node;
