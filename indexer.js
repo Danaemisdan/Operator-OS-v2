@@ -134,9 +134,12 @@
       }
       // --- Spatial DOM Grouping ---
       let zone = 'Main Content';
-      const container = node.closest('nav, header, footer, aside, main, form');
-      if (container) {
-         const t = container.tagName;
+      let parentContext = '';
+      
+      // 1. Find high-level zone (Header, Footer, Nav, Main)
+      const zoneContainer = node.closest('nav, header, footer, aside, main, form');
+      if (zoneContainer) {
+         const t = zoneContainer.tagName;
          if (t === 'NAV') zone = 'Navigation';
          else if (t === 'HEADER') zone = 'Header';
          else if (t === 'FOOTER') zone = 'Footer';
@@ -144,12 +147,37 @@
          else if (t === 'FORM') zone = 'Form Area';
          else if (t === 'MAIN') zone = 'Main Content';
       } else {
-         // Fallbacks based on position
          if (rect.top < window.innerHeight * 0.15) zone = 'Header Area';
          else if (rect.bottom > window.innerHeight * 0.9) zone = 'Footer Area';
       }
 
-      candidates.push({ node, rect, prefix, priority, area: rect.width * rect.height, zone, shouldDiscard: false });
+      // 2. Find local semantic container (e.g. a search result card, a list item, an article)
+      const localContainer = node.closest('article, section, li, tr, dialog, fieldset, [role="listitem"], [role="article"], [role="card"]');
+      if (localContainer) {
+        // Try to extract a meaningful header or label from the container
+        const heading = localContainer.querySelector('h1, h2, h3, h4, h5, h6');
+        const ariaLbl = localContainer.getAttribute('aria-label');
+        if (heading && heading.innerText) {
+          parentContext = heading.innerText.trim().replace(/\n/g, ' ').substring(0, 40);
+        } else if (ariaLbl) {
+          parentContext = ariaLbl.substring(0, 40);
+        } else {
+          parentContext = localContainer.tagName.toLowerCase();
+        }
+      } else {
+        // Fallback: look for a generic div card container by class name heuristic
+        const genericCard = node.closest('[class*="card"], [class*="result"], [class*="item"]');
+        if (genericCard) {
+          const heading = genericCard.querySelector('h1, h2, h3, h4, h5, h6');
+          if (heading && heading.innerText) {
+             parentContext = heading.innerText.trim().replace(/\n/g, ' ').substring(0, 40);
+          } else {
+             parentContext = 'Item Group';
+          }
+        }
+      }
+
+      candidates.push({ node, rect, prefix, priority, area: rect.width * rect.height, zone, parentContext, shouldDiscard: false });
     });
 
     // PASS 1: DOM Hierarchy Deduplication

@@ -183,7 +183,13 @@ ${pageSummary}`;
       const overlayEls = interactiveEls.filter(e =>
         e.isOverlay || DISMISS_RE.test((e.text || e.placeholder || '').trim())
       );
-      const overlayBlock = overlayEls.length > 0
+      
+      // If the last action was a click, assume the new overlay is an intentional dropdown/menu,
+      // not an annoying blocking popup that must be closed immediately.
+      const lastAction = previousActions.length > 0 ? previousActions[previousActions.length - 1] : '';
+      const justClicked = lastAction.includes('**click**');
+
+      const overlayBlock = (overlayEls.length > 0 && !justClicked)
         ? `\n⚠️ POPUP/OVERLAY IS BLOCKING THE PAGE — dismiss it FIRST before any other action:\n` +
           overlayEls.map(e => `  [${e.id}] "${e.text || e.placeholder}" — closes/dismisses this overlay`).join('\n') + '\n'
         : '';
@@ -240,34 +246,37 @@ ${pageSummary}`;
 
            interactiveEls = interactiveEls
              .sort((a, b) => b._smartScore - a._smartScore)
-             .slice(0, 25)
              .map(e => { delete e._smartScore; return e; });
+
+           // Limit interactive elements to shrink context size (was 25)
+           if (!graphQuery || !graphQuery.type) {
+             interactiveEls = interactiveEls.slice(0, 15);
+           }
          } else {
-           interactiveEls = interactiveEls.slice(0, 30);
+           interactiveEls = interactiveEls.slice(0, 15); // also limit default overview
          }
       }
 
-      // Group elements
-      const zones = {};
+      // Group elements by spatial Parent Context (e.g. Card, Article) to provide contextual clues
+      // instead of a flat list, drastically reducing redundancy.
+      const clusters = {};
       interactiveEls.forEach(e => {
-        const z = e.zone || 'Main Content';
-        if (!zones[z]) zones[z] = [];
-        if (zones[z].length < 50) zones[z].push(e); // Cap elements per zone to avoid overflow
+        const clusterName = e.parentContext || e.zone || 'Main Content';
+        if (!clusters[clusterName]) clusters[clusterName] = [];
+        clusters[clusterName].push(e);
       });
 
-      const elLines = Object.entries(zones).map(([zoneName, els]) => {
-        const zoneEls = els.map(e => {
-          const label = (e.text || e.placeholder || '').substring(0, 50);
+      const elLines = Object.entries(clusters).map(([clusterName, els]) => {
+        const clusterEls = els.map(e => {
+          const label = (e.text || e.placeholder || '').substring(0, 30);
           const st = e._state;
           const stateStr = st?.typed  ? ` [✓ FILLED: "${st.value}"]` :
                            st?.clicked ? ` [✓ CLICKED]` : '';
-          const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
-          const desc = e.semanticIntent || e.predictedEffect || e._exploration?.purpose || e.role || '';
-          const ctxStr = e.parentContext ? ` (Inside: ${e.parentContext})` : '';
-          return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}${ctxStr}`;
+          const valStr = (!st?.typed && e.value) ? ` [cur: "${e.value}"]` : '';
+          return `  [${e.id}] "${label}"${stateStr}${valStr}`;
         }).join('\n');
-        return `[${zoneName}]\n${zoneEls}`;
-      }).join('\n\n');
+        return `[Container: ${clusterName}]\n${clusterEls}`;
+      }).join('\n');
 
       pageContext = `\n\nCurrent browser page:
 - URL: ${graph.url || 'unknown'}
@@ -312,7 +321,7 @@ AVAILABLE ACTIONS — respond with exactly one JSON object:
 
 RULES:
 1. Output ONLY the raw JSON. No markdown blocks, no prose, no chat. Begin with {.
-2. GENERAL COGNITIVE LOOP: Before using extract_data, VERIFY you are on the correct destination page (check the URL and Title). Do not prematurely extract data from intermediate states like homepages or autocomplete dropdowns. Use extract_data selectively when you need to gather facts, compare items, or read long text.
+2. GENERAL COGNITIVE LOOP: Before using extract_data, CONFIRM you are on the correct destination page (check the URL and Title). Do not prematurely extract data from intermediate states like homepages or autocomplete dropdowns. Use extract_data selectively when you need to gather facts, compare items, or read long text.
 3. DO NOT randomly click list items without comparing them in your scratchpad first.
 4. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
 5. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.

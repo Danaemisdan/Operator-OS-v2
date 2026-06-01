@@ -769,8 +769,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
           const titleChg = prevSnapshot.title !== (activeGraph.title||'');
           const urlChg   = prevSnapshot.url   !== (activeGraph.url||'');
           const isEmpty  = appeared.length===0 && removed.length===0 && !titleChg && !urlChg;
-          // Scroll never changes DOM element IDs — never count toward stall
-          if (isEmpty && lastExecutedAction !== 'scroll') {
+          // Scroll and Type rarely change DOM element IDs — don't count them toward stall
+          if (isEmpty && lastExecutedAction !== 'scroll' && lastExecutedAction !== 'type') {
             noChangedCount++;
           } else if (!isEmpty) {
             noChangedCount = 0; // reset stall counter — page moved
@@ -1149,7 +1149,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
             }
 
             if (action === 'click') await waitForPageLoad(wv, 4000);
-            else await delay(600);
+            else await delay(1200); // Increased from 600 to 1200 to let DOM settle after type
             await refreshActiveGraph(wv);
 
             const urlNow = wv.src || '';
