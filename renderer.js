@@ -1052,7 +1052,10 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         } else if (action === 'extract_data') {
           const question = args.question || 'Extract the top results, prices, and relevant details';
-          const targetId = (args.targetId || '').trim();
+          let targetId = (args.targetId || '').trim();
+          if (targetId.toLowerCase() === 'none' || targetId.toLowerCase() === 'null' || targetId.toLowerCase() === 'false') {
+            targetId = '';
+          }
           let pageText = '';
           
           if (targetId) {
@@ -1081,8 +1084,6 @@ Return ONLY a JSON array of question strings, nothing else.`;
             msg += `<br>📊 Extracting global data for: <em>${question}</em>`;
             pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 5000);
           }
-          
-          appendAiMessage(msg);
           
           // Automatically store the raw extracted data directly into the agent's memory
           taskScratchpad += `\n[EXTRACTED DATA: "${question}"]:\n${pageText}\n`;
