@@ -1053,7 +1053,8 @@ Return ONLY a JSON array of question strings, nothing else.`;
         } else if (action === 'extract_data') {
           msg += `<br>📊 Extracting data matching: <em>${args.schema}</em>`;
           appendAiMessage(msg);
-          const extPrompt = `Extract data matching this schema: "${args.schema}"\nReturn ONLY the extracted data as concise text, or "Not found".\n\nPAGE TEXT:\n${textContent.substring(0, 10000)}`;
+          const pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 10000);
+          const extPrompt = `Extract data matching this schema: "${args.schema}"\nReturn ONLY the extracted data as concise text, or "Not found".\n\nPAGE TEXT:\n${pageText}`;
           // Use chatAgentWithLLM to do the extraction locally
           const extractedResponse = await window.electronAPI.agentChat(extPrompt, {}, [], memory, []);
           const extResult = extractedResponse.args?.text || JSON.stringify(extractedResponse);
