@@ -160,7 +160,8 @@ ipcMain.handle('agent-chat', async (event, { promptText, graph, previousActions,
     return result;
   } catch (error) {
     console.error('Agent Chat Error:', error);
-    return { tool: 'reply', args: { text: 'Error contacting agent.' }, status: 'error' };
+    require('fs').writeFileSync('/Users/sanjeevn/Downloads/Operator OS/last_agent_error.txt', error.stack || error.message || String(error));
+    return { tool: 'reply', args: { text: `Error contacting agent: ${error.message}` }, status: 'error' };
   }
 });
 
