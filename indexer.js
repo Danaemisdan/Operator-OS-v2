@@ -151,12 +151,38 @@
     });
 
     let filtered = [];
+    
+    // PASS 1: Identify large containers that should be discarded because they contain smaller clickable items
     for (let i = 0; i < candidates.length; i++) {
       let c1 = candidates[i];
+      for (let j = 0; j < candidates.length; j++) {
+        if (i === j) continue;
+        let c2 = candidates[j];
+        
+        let overlapArea = 0;
+        let overlapX = Math.max(0, Math.min(c1.rect.right, c2.rect.right) - Math.max(c1.rect.left, c2.rect.left));
+        let overlapY = Math.max(0, Math.min(c1.rect.bottom, c2.rect.bottom) - Math.max(c1.rect.top, c2.rect.top));
+        if (overlapX > 0 && overlapY > 0) overlapArea = overlapX * overlapY;
+        
+        let c1SubsetOfC2 = overlapArea > 0.8 * c1.area;
+        if (c1SubsetOfC2) {
+           if (c1.priority >= 2 && c2.priority >= 1 && c2.priority <= c1.priority) {
+              c2.shouldDiscard = true;
+           }
+        }
+      }
+    }
+    
+    // PASS 2: Safely remove subsets (e.g. text nodes inside valid containers)
+    for (let i = 0; i < candidates.length; i++) {
+      let c1 = candidates[i];
+      if (c1.shouldDiscard) continue;
+      
       let isSubset = false;
       for (let j = 0; j < candidates.length; j++) {
         if (i === j) continue;
         let c2 = candidates[j];
+        if (c2.shouldDiscard) continue; // Don't let discarded containers destroy text nodes!
         
         let overlapArea = 0;
         let overlapX = Math.max(0, Math.min(c1.rect.right, c2.rect.right) - Math.max(c1.rect.left, c2.rect.left));
@@ -181,15 +207,10 @@
            if (c2.priority === 0 && c1.priority === 0) {
               isSubset = true; break;
            }
-           if (c1.priority >= 2 && c2.priority >= 1 && c2.priority <= c1.priority) {
-              c2.shouldDiscard = true;
-           }
         }
       }
       if (!isSubset) filtered.push(c1);
     }
-    
-    filtered = filtered.filter(c => !c.shouldDiscard);
     
     const elements = [];
     let counters = { BTN: 0, INP: 0, LNK: 0, IMG: 0, VID: 0, TXT: 0, ELM: 0 };
@@ -248,8 +269,8 @@
       const svgTitle = (() => { try { return node.querySelector('title')?.textContent || ''; } catch(_){return '';} })();
       const innerTxt = (node.innerText || '').trim().replace(/\n/g,' ').replace(/\s+/g,' ').substring(0, 80);
       const altTxt   = node.alt || '';
-      // Prefer: aria-label > innerText (if short enough) > title > SVG title > placeholder > alt
-      const text = (ariaLbl || (innerTxt.length < 80 && innerTxt) || titleLbl || svgTitle || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
+      // Prefer: aria-label > title > innerText > placeholder > alt
+      const text = (ariaLbl || titleLbl || innerTxt || svgTitle || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
       let parent = node.parentElement;
       let parentContext = '';
       let depth = 0;
