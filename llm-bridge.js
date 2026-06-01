@@ -234,7 +234,7 @@ RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join
 AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
 {"tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
-{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>"},"status":"running"}
+{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>","submit_after": "<true/false (use true for search boxes and chat boxes to hit Enter immediately)>"},"status":"running"}
 {"tool":"press_enter","args":{},"status":"running"}
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
 {"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}

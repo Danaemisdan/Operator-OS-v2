@@ -375,11 +375,18 @@ ipcMain.handle('execute-action', async (event, actionParams) => {
   }
 
   if (action === 'type') {
-    const { text } = payload;
+    const { text, submit_after } = payload;
     for (let i = 0; i < text.length; i++) {
       if (wc.isDestroyed()) break; // Stop typing if page navigated away
       safeEvent({ type: 'char', keyCode: text[i] });
       await delay(30 + Math.random() * 70);
+    }
+    if (submit_after && !wc.isDestroyed()) {
+      await delay(100);
+      safeEvent({ type: 'keyDown', keyCode: 'Enter' });
+      await delay(50);
+      safeEvent({ type: 'keyUp', keyCode: 'Enter' });
+      safeEvent({ type: 'char', keyCode: '\r' });
     }
     return true;
   }

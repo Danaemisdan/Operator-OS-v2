@@ -1132,7 +1132,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
               await window.electronAPI.executeAction({
                 webContentsId: wv.getWebContentsId(),
                 action: 'type',
-                payload: { x, y, text: args.text || '' }
+                payload: { x, y, text: args.text || '', submit_after: args.submit_after === true || String(args.submit_after).toLowerCase() === 'true' }
               });
             } else {
               await window.electronAPI.executeAction({
