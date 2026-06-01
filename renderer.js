@@ -1051,16 +1051,17 @@ Return ONLY a JSON array of question strings, nothing else.`;
           continue;
 
         } else if (action === 'extract_data') {
-          msg += `<br>📊 Extracting data matching: <em>${args.schema}</em>`;
+          const question = args.question || 'Extract the top results, prices, and relevant details';
+          msg += `<br>📊 Extracting data for: <em>${question}</em>`;
           appendAiMessage(msg);
           const pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 10000);
-          const extPrompt = `Extract data matching this schema: "${args.schema}"\nReturn ONLY the extracted data as concise text, or "Not found".\n\nPAGE TEXT:\n${pageText}`;
+          const extPrompt = `Extract data from the PAGE TEXT answering this question: "${question}"\nReturn ONLY the extracted data as concise text, or "Not found" if the data is not on the page.\n\nPAGE TEXT:\n${pageText}`;
           // Use chatAgentWithLLM to do the extraction locally
           const extractedResponse = await window.electronAPI.agentChat(extPrompt, {}, [], memory, []);
           const extResult = extractedResponse.args?.text || JSON.stringify(extractedResponse);
           
           // Automatically store the extracted data directly into the agent's memory
-          taskScratchpad += `\n[EXTRACTED DATA for "${args.schema}"]:\n${extResult}\n`;
+          taskScratchpad += `\n[EXTRACTED DATA: "${question}"]:\n${extResult}\n`;
           
           previousActions.push(`Extracted data and saved to Scratchpad.`);
           msg += `<br>✅ Extracted & Saved to memory.`;

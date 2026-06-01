@@ -243,12 +243,12 @@ AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
 {"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
 {"tool":"scratchpad","args":{"text":"<notes about what you have tried, what failed, or what to do next>"},"status":"running"}
-{"tool":"extract_data","args":{"schema":"<what data to extract>"},"status":"running"}
+{"tool":"extract_data","args":{"question":"<what information do you want to extract from the current page?>"},"status":"running"}
 {"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
 
 RULES:
 1. Output ONLY the JSON. Nothing before or after.
-2. GENERAL COGNITIVE LOOP: Before making decisions on complex pages, lists, or articles, you MUST use extract_data to pull the relevant facts. The extracted facts will automatically be stored in your WORKING MEMORY SCRATCHPAD.
+2. GENERAL COGNITIVE LOOP: When looking at a list of search results or products, you MUST use extract_data to pull the prices/details. Do NOT use this on search engine homepages.
 3. DO NOT randomly click list items without comparing them in your scratchpad first.
 4. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
 5. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
