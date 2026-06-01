@@ -22,32 +22,24 @@ async function decomposeGoal(goal, availableSkills, currentUrl, sender, pageCont
     `- Steps must include actual site names, exact queries, and filter values from the goal.\n` +
     `- Group related sub-actions. "search Google for X and click first result" is ONE step.\n` +
     `- Never split: "click Submit" is not a step — the executor handles UI details.\n` +
-    `- Good plan for "find cheap water bottles": ["search Google Shopping for cheap water bottles under 500", "report the top 3 results with names and prices"]\n` +
-    `- Good plan for "book flight NYC to LA": ["search Google Flights for cheapest one-way NYC to LA next week", "report the cheapest options found"]\n\n` +
+    `- Good plan for "find cheap [item]": ["navigate to a relevant store and search for cheap [item]", "report the top 3 results with names and prices"]\n` +
+    `- Good plan for "book [event] tickets in [city]": ["search a relevant ticket site for [event] tickets in [city]", "report the available options"]\n\n` +
 
     `CLARIFYING QUESTIONS — ask when the goal is a CATEGORY, not a specific thing:\n` +
     `ASK when you see these patterns:\n` +
     `  "find me a job" → job role? location? remote or on-site?\n` +
-    `  "find me some X" where X is a category (furniture, shoes, phone) → what type? budget?\n` +
-    `  "book a flight / hotel / restaurant" → where from? where to? when? how many?\n` +
-    `  "buy something / buy me a gift" → what category? budget?\n` +
-    `  "follow people on instagram" → who? what criteria?\n` +
-    `  "send a message" → to whom? what to say?\n` +
-    `  "post something" → on which platform? what content?\n` +
-    `  "order food" → from where? what do you want?\n` +
+    `  "find me some [category of item]" → what specific type? budget?\n` +
+    `  "book a [service/travel/event]" → where? when? how many?\n` +
+    `  "buy me a gift" → what category? budget?\n` +
     `  "search for good ones" → good what? category? price range?\n` +
-    `DO NOT ask when the goal is already specific:\n` +
-    `  "search YouTube for lofi music" → specific enough\n` +
-    `  "open amazon.com" → specific enough\n` +
-    `  "find cheap iPhone 15 Pro on Amazon" → specific enough\n` +
-    `  "search Google for water bottles under 500" → specific enough\n` +
+    `DO NOT ask when the goal is already specific enough to search for.\n` +
     `Max 2 questions. questions:[] only if FULLY specified with a clear search target.\n\n` +
 
     `AVAILABLE SKILLS:\n` +
     `${availableSkills.length > 0 ? availableSkills.map(s => `- ${s}`).join('\n') : '- (none)'}\n\n` +
 
     `Output format — steps MUST be plain strings, NOT objects:\n` +
-    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["navigate to Google Shopping and search for water bottles under 500","report the top 3 results with names and prices"]}\n\n` +
+    `{"questions":[],"research_needed":false,"research_skill":null,"research_args":null,"steps":["navigate to <website> and search for <target>","extract and report the top results"]}\n\n` +
 
     `${pageInfo}\n` +
     `Goal: "${goal}"\n\n` +
