@@ -269,6 +269,46 @@
         scanNode = scanNode.parentElement;
       }
 
+      // ── Semantic Intent Generation ───────────────────────────────────────────
+      let semanticIntent = '';
+      const tLower = text.toLowerCase();
+      const pContextLower = parentContext.toLowerCase();
+      
+      if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') {
+        const type = (node.getAttribute('type') || '').toLowerCase();
+        if (type === 'search' || tLower.includes('search') || pContextLower.includes('search')) {
+          semanticIntent = `Input field to search or query the site for '${text || 'keywords'}'`;
+        } else if (type === 'email' || tLower.includes('email')) {
+          semanticIntent = `Email input field for authentication or contact`;
+        } else if (type === 'password') {
+          semanticIntent = `Password input field for authentication`;
+        } else {
+          semanticIntent = `Text input field for entering '${text || 'data'}'`;
+        }
+      } else if (node.tagName === 'BUTTON' || c.prefix === 'BTN') {
+        if (tLower.includes('search') || tLower.includes('find')) {
+          semanticIntent = `Button to submit search query`;
+        } else if (tLower.includes('sign in') || tLower.includes('log in') || tLower.includes('login')) {
+          semanticIntent = `Button to authenticate and log into user account`;
+        } else if (tLower.includes('add to cart') || tLower.includes('buy')) {
+          semanticIntent = `Button to add item to shopping cart or purchase`;
+        } else if (tLower.includes('close') || tLower.includes('dismiss') || tLower.includes('cancel')) {
+          semanticIntent = `Button to close modal or dismiss dialog`;
+        } else {
+          semanticIntent = `Button to trigger action: ${text || 'submit'}`;
+        }
+      } else if (c.prefix === 'LNK') {
+        if (tLower.includes('sign in') || tLower.includes('log in')) {
+          semanticIntent = `Navigation link to authentication/login page`;
+        } else {
+          semanticIntent = `Navigation link leading to ${text || 'another page'}`;
+        }
+      } else if (c.prefix === 'IMG') {
+        semanticIntent = `Visual image depicting ${text || 'content'}`;
+      } else {
+        semanticIntent = `Content element displaying ${text || 'information'}`;
+      }
+
       elements.push({
         id:          id,
         tag:         node.tagName.toLowerCase(),
@@ -289,6 +329,7 @@
         expanded:    node.getAttribute('aria-expanded') || '',
         valuenow:    node.getAttribute('aria-valuenow') || '',
         parentContext: parentContext.trim(),
+        semanticIntent: semanticIntent,
         zone:        c.zone,
         hasChildren: node.querySelector('input,button,select,textarea') !== null,
         position:    { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },

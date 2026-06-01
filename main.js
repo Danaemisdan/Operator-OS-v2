@@ -143,7 +143,7 @@ ipcMain.handle('analyze-ui-llm', async (event, graph) => {
   }
 });
 
-ipcMain.handle('agent-chat', async (event, { promptText, graph, previousActions, memory, conversationHistory, pageSummary, taskScratchpad, graphQuery }) => {
+ipcMain.handle('agent-chat', async (event, { promptText, graph, previousActions, memory, conversationHistory, pageSummary, taskScratchpad, memorypad, graphQuery }) => {
   try {
     const result = await chatAgentWithLLM(
       promptText,
@@ -155,6 +155,7 @@ ipcMain.handle('agent-chat', async (event, { promptText, graph, previousActions,
       false,
       pageSummary || '',
       taskScratchpad || '',
+      memorypad || '',
       graphQuery || null
     );
     return result;

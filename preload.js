@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   analyzeUI:      (g) => ipcRenderer.invoke('analyze-ui-llm', g),
 
   // Agent
-  agentChat:      (prompt, graph, prev, memory, hist, scratchpad, query) => ipcRenderer.invoke('agent-chat', { promptText: prompt, graph, previousActions: prev, memory, conversationHistory: hist, taskScratchpad: scratchpad, graphQuery: query }),
+  agentChat:      (prompt, graph, prev, memory, hist, scratchpad, memorypad, query) => ipcRenderer.invoke('agent-chat', { promptText: prompt, graph, previousActions: prev, memory, conversationHistory: hist, taskScratchpad: scratchpad, memorypad, graphQuery: query }),
 
   // Streams
   onAgentStream:    (cb) => ipcRenderer.on('agent-stream-chunk',   (_, t) => cb(t)),

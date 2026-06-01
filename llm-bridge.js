@@ -155,11 +155,11 @@ function analyzeUIWithLLM(graph) {
 // ─── Main Agent Chat (with full conversation history for chat mode) ────────────
 // pageSummary: pre-computed heuristic llm_summary from explorePage() — use this
 // instead of raw elements when available. Shorter prompt = faster inference.
-async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '', taskScratchpad = '', graphQuery = null) {
-  // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
-  const isChatMode = !graph.elements || graph.elements.length === 0;
+async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '', taskScratchpad = '', memorypad = '', graphQuery = null) {
+  const isChatMode = !graph || !graph.elements || graph.elements.length === 0;
+
   let pageContext = '';
-  const hasPage = graph.url || (graph.elements && graph.elements.length > 0);
+  const hasPage = graph && (graph.url || (graph.elements && graph.elements.length > 0));
   if (hasPage) {
     if (pageSummary) {
       // Use pre-computed heuristic exploration summary — already classified, structured
@@ -199,8 +199,61 @@ ${pageSummary}`;
          }
          interactiveEls = interactiveEls.slice(0, 150); // Generous limit for targeted queries
       } else {
-         // Default Overview: Just show a small preview so the agent is forced to query for what it wants
-         interactiveEls = interactiveEls.slice(0, 30);
+         // Smart Auto-Query System
+         let currentStepText = '';
+         const stepMatch = promptText.match(/STEP \(\d+\/\d+\):\s*(.*)/);
+         if (stepMatch) currentStepText = stepMatch[1].toLowerCase();
+
+         if (currentStepText) {
+           const isSearch = currentStepText.includes('search') || currentStepText.includes('find') || currentStepText.includes('query');
+           const isAuth = currentStepText.includes('log in') || currentStepText.includes('login') || currentStepText.includes('sign in');
+           const isBuy = currentStepText.includes('buy') || currentStepText.includes('cart') || currentStepText.includes('checkout');
+           
+           interactiveEls = interactiveEls.map(e => {
+             let score = 0;
+             const tLower = (e.text || '').toLowerCase();
+             const pContextLower = (e.parentContext || '').toLowerCase();
+             const sIntent = (e.semanticIntent || '').toLowerCase();
+             const type = e.id.substring(0, 3);
+             
+             // Boost based on step intent
+             if (isSearch) {
+               if (type === 'INP' && (tLower.includes('search') || pContextLower.includes('search') || sIntent.includes('search'))) score += 50;
+               if (type === 'BTN' && (tLower.includes('search') || sIntent.includes('search'))) score += 30;
+             }
+             if (isAuth) {
+               if (type === 'INP' && (tLower.includes('email') || tLower.includes('password') || sIntent.includes('auth'))) score += 50;
+               if ((type === 'BTN' || type === 'LNK') && (tLower.includes('sign in') || tLower.includes('log in') || sIntent.includes('auth'))) score += 50;
+             }
+             if (isBuy) {
+               if (type === 'BTN' && (tLower.includes('cart') || tLower.includes('buy') || tLower.includes('checkout') || sIntent.includes('cart'))) score += 50;
+             }
+             
+             // Word overlap matching
+             const stepWords = currentStepText.replace(/[^a-z0-9 ]/g, '').split(' ').filter(w => w.length > 3 && !['navigate','click','type'].includes(w));
+             stepWords.forEach(w => {
+               if (tLower.includes(w)) score += 20;
+               if (sIntent.includes(w)) score += 10;
+             });
+
+             // Base weights for interactive potential
+             if (type === 'INP') score += 15;
+             if (type === 'BTN') score += 10;
+             if (type === 'LNK') score += 5;
+             if (e.isOverlay) score += 40; // High priority to dismiss popups
+             
+             return { ...e, _smartScore: score };
+           });
+           
+           // Sort by score descending and take top 25, then clean up
+           interactiveEls = interactiveEls
+             .sort((a, b) => b._smartScore - a._smartScore)
+             .slice(0, 25)
+             .map(e => { delete e._smartScore; return e; });
+         } else {
+           // Default Overview
+           interactiveEls = interactiveEls.slice(0, 30);
+         }
       }
 
       // Group elements
@@ -218,7 +271,7 @@ ${pageSummary}`;
           const stateStr = st?.typed  ? ` [✓ FILLED: "${st.value}"]` :
                            st?.clicked ? ` [✓ CLICKED]` : '';
           const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
-          const desc = e.predictedEffect || e._exploration?.purpose || e.role || '';
+          const desc = e.semanticIntent || e.predictedEffect || e._exploration?.purpose || e.role || '';
           const ctxStr = e.parentContext ? ` (Inside: ${e.parentContext})` : '';
           return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}${ctxStr}`;
         }).join('\n');
@@ -248,6 +301,9 @@ ${memory ? `\nMEMORY: ${memory}` : ''}
 ${(() => { try { const keys = memoryStore.listVariableKeys(); return keys.length > 0 ? `USER HAS: ${keys.join(', ')} — use these when logging in or filling forms, DO NOT ask user for them` : ''; } catch(_) { return ''; } })()}
 WORKING MEMORY SCRATCHPAD:
 ${taskScratchpad || '(empty - write notes to yourself if needed)'}
+
+LARGE DATA MEMORYPAD (For extracted content):
+${memorypad || '(empty)'}
 
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 

@@ -653,7 +653,10 @@ Return ONLY a JSON array of question strings, nothing else.`;
   async function handleTaskExecution(rawGoal) {
   // Phase A: decompose goal — planner returns steps AND any clarifying questions
   // (questions handled by planner: LLM + deterministic pattern fallback)
+  // Start fresh Task Progress Panel
+  tpp.show(executorGoal);
   let taskScratchpad = '';
+  let memorypad = '';
   streamDiv = null;
   // Pass current page state so planner generates specific, contextual steps
   const wv0 = getActiveWebview();
@@ -869,7 +872,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         streamDiv = null;
         const agentResponse = await window.electronAPI.agentChat(
-          contextualStep, annotatedGraph, previousActions, memory, [], taskScratchpad, currentGraphQuery
+          contextualStep, annotatedGraph, previousActions, memory, [], taskScratchpad, memorypad, currentGraphQuery
         );
         streamDiv = null;
 
@@ -1072,10 +1075,10 @@ Return ONLY a JSON array of question strings, nothing else.`;
             pageText = activeGraph.elements.map(e => (e.text || e.value || '').trim()).filter(Boolean).join('\\n').substring(0, 5000);
           }
           
-          // Automatically store the raw extracted data directly into the agent's memory
-          taskScratchpad += `\n[EXTRACTED DATA: "${question}"]:\n${pageText}\n`;
+          // Automatically store the raw extracted data directly into the agent's memorypad
+          memorypad += `\n[EXTRACTED DATA: "${question}"]:\n${pageText}\n`;
           
-          previousActions.push(`Extracted text and saved to Scratchpad.`);
+          previousActions.push(`Extracted text and saved to Memorypad.`);
           msg += `<br>✅ Extracted & Saved to memory.`;
           appendAiMessage(msg);
           continue;
