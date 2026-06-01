@@ -112,8 +112,10 @@ function analyzeUIWithLLM(graph) {
       // Use the label directly — it's the most honest description
       // Add context about what kind of action it is
       const lc = primaryLabel.toLowerCase();
-      if (inputType === 'submit' || lc === 'submit' || lc === 'send' || lc === 'go' || lc === 'search') {
+      if (inputType === 'submit' || lc === 'submit' || lc === 'send' || lc === 'go' || lc === 'search' || lc === 'google search') {
         predictions[el.id] = `Submit / confirm button: "${labelText}"`;
+      } else if (lc.includes('voice') || lc.includes('microphone') || lc === 'mic') {
+        predictions[el.id] = `Voice input button: "${labelText}" — DO NOT use for text searches`;
       } else if (lc.includes('close') || lc.includes('dismiss') || lc === '✕' || lc === 'x' || lc === '×') {
         predictions[el.id] = `Close/dismiss: "${labelText}" — closes this modal or overlay`;
       } else if (lc.includes('sign in') || lc.includes('log in')) {

@@ -735,29 +735,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
     let noChangedCount = 0;    // actions with zero page diff = stall detection
     let lastExecutedAction = null; // track last action type so diff can be smarter
 
-    // ── Already-on-page check ──────────────────────────────────────────────
-    // If this step says "open / navigate / go to X" and the browser is
-    // already on a page whose hostname contains the same keyword, skip it.
-    // Generic — no hardcoded domain list. Works for any site.
-    const stepL = currentStep.toLowerCase();
-    const wvNow = getActiveWebview();
-    const urlNow0 = (wvNow && wvNow.src) ? wvNow.src.toLowerCase() : '';
-    const isNavStep = /\b(open|navigate|go to|visit|browse to|launch)\b/.test(stepL);
-    if (isNavStep && urlNow0) {
-      // Extract meaningful words from current hostname, e.g. "google" from "www.google.com"
-      const hostname  = urlNow0.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
-      const siteWords = hostname.split(/[.\-]/).filter(
-        w => w.length > 2 && !['com','org','net','io','co','app','www'].includes(w)
-      );
-      const alreadyThere = siteWords.some(word => stepL.includes(word));
-      if (alreadyThere) {
-        appendAiMessage(`✓ Already on this page — skipping "${currentStep}"`);
-        tpp.stepDone(currentStepIdx);
-        currentStepIdx++;
-        previousActions = [`Already on correct page. Skipped navigation step.`];
-        continue;
-      }
-    }
+
 
     while (!isComplete && actionCount < MAX_ACTIONS_PER_STEP) {
 
