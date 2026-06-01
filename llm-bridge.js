@@ -242,18 +242,17 @@ AVAILABLE ACTIONS — respond with exactly one JSON object:
 {"tool":"press_enter","args":{},"status":"running"}
 {"tool":"scroll","args":{"text":"down"},"status":"running"}
 {"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
-{"tool":"scratchpad","args":{"text":"<notes about what you have tried, what failed, or what to do next>"},"status":"complete"}
-{"tool":"dismiss_popups","args":{},"status":"complete"}
-{"tool":"extract_data","args":{"schema":"<what data to extract>"},"status":"complete"}
+{"tool":"scratchpad","args":{"text":"<notes about what you have tried, what failed, or what to do next>"},"status":"running"}
+{"tool":"extract_data","args":{"schema":"<what data to extract>"},"status":"running"}
 {"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
 
 RULES:
 1. Output ONLY the JSON. Nothing before or after.
-2. OVERLAY visible? Dismiss it first — click its close/done button before anything else.
-3. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
-4. On search/listing results and the goal was to FIND something? Use reply to summarise what you found. Only click into a specific item if the goal requires buying, booking, or getting full details.
-5. Only use reply when the answer/content is actually visible on screen.
-6. If you typed + pressed enter and the page changed: read the new page — do NOT type or press enter again.`;
+2. GENERAL COGNITIVE LOOP: Before making decisions on complex pages, lists, or articles, you MUST use extract_data to pull the relevant facts. The extracted facts will automatically be stored in your WORKING MEMORY SCRATCHPAD.
+3. DO NOT randomly click list items without comparing them in your scratchpad first.
+4. OVERLAYS/POPUPS: If a popup or cookie banner blocks the page, identify its dismiss/close button in the DOM and click it. Do NOT hallucinate that it was dismissed.
+5. Field already FILLED (✓ FILLED)? Do NOT type again — press_enter or click submit.
+6. Only use reply when the answer/content is actually visible on screen or in your scratchpad.`;
 
   const messages = isChatMode
     ? [

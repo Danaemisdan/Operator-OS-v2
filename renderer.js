@@ -945,9 +945,13 @@ Return ONLY a JSON array of question strings, nothing else.`;
             continue;
           }
 
-          if (!obs.action_succeeded && obs.confidence > 0.7) {
+          if (!obs.goal_achieved && !obs.action_succeeded && obs.confidence > 0.7) {
             appendAiMessage(`❌ Observer: step not complete — ${obs.what_changed}. ${obs.next_hint}`);
             previousActions.push(`Observer says NOT complete: ${obs.what_changed}. Hint: ${obs.next_hint}`);
+            continue;
+          } else if (obs.action_succeeded && !obs.goal_achieved) {
+            appendAiMessage(`⚠️ Action succeeded (${obs.what_changed}) but step goal is NOT YET achieved. Continuing...`);
+            previousActions.push(`Action succeeded: ${obs.what_changed}. But goal is not met yet. Hint: ${obs.next_hint}`);
             continue;
           }
 
@@ -1046,26 +1050,6 @@ Return ONLY a JSON array of question strings, nothing else.`;
           previousActions.push(`Wrote to scratchpad: "${note}"`);
           continue;
 
-        } else if (action === 'dismiss_popups') {
-          msg += `<br>🛡️ Auto-dismissing overlays...`;
-          appendAiMessage(msg);
-          await window.electronAPI.executeAction({
-            webContentsId: wv.getWebContentsId(),
-            action: 'execute_js',
-            payload: { code: `
-              const dismissWords = /(accept|agree|got it|close|dismiss|no thanks|reject|allow)/i;
-              document.querySelectorAll('button, [role="button"], a').forEach(el => {
-                if (dismissWords.test(el.textContent) && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0) {
-                   try { el.click(); } catch(e){}
-                }
-              });
-            `}
-          });
-          await delay(1500);
-          await refreshActiveGraph(wv);
-          previousActions.push(`Executed auto-dismiss for popups. Assume overlays are cleared.`);
-          continue;
-
         } else if (action === 'extract_data') {
           msg += `<br>📊 Extracting data matching: <em>${args.schema}</em>`;
           appendAiMessage(msg);
@@ -1073,8 +1057,12 @@ Return ONLY a JSON array of question strings, nothing else.`;
           // Use chatAgentWithLLM to do the extraction locally
           const extractedResponse = await window.electronAPI.agentChat(extPrompt, {}, [], memory, []);
           const extResult = extractedResponse.args?.text || JSON.stringify(extractedResponse);
-          previousActions.push(`Extracted data for schema "${args.schema}": ${extResult.substring(0, 500)}`);
-          msg += `<br>✅ Extracted: ${extResult.substring(0, 100)}...`;
+          
+          // Automatically store the extracted data directly into the agent's memory
+          taskScratchpad += `\n[EXTRACTED DATA for "${args.schema}"]:\n${extResult}\n`;
+          
+          previousActions.push(`Extracted data and saved to Scratchpad.`);
+          msg += `<br>✅ Extracted & Saved to memory.`;
           appendAiMessage(msg);
           continue;
 

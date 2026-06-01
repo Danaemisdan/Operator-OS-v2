@@ -61,6 +61,7 @@ Answer ONLY with this JSON:
   "state": "machine_readable_state_name",
   "what_changed": "one sentence describing what actually changed after the action, or 'nothing changed' if nothing did",
   "action_succeeded": true_or_false,
+  "goal_achieved": true_or_false,
   "blockers": ["only list genuine hard blockers with no dismiss option, empty array if dismissable or no blocker"],
   "confidence": 0.0_to_1.0,
   "next_hint": "one specific sentence: what should happen next to make progress toward the goal"
