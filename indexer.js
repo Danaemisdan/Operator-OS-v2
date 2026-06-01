@@ -150,66 +150,29 @@
       candidates.push({ node, rect, prefix, priority, area: rect.width * rect.height, zone, shouldDiscard: false });
     });
 
+    // PASS 1: DOM Hierarchy Deduplication
+    // Discard text nodes if they are fully contained inside an interactive element (BTN/LNK)
+    // to reduce noise, since the interactive element's label already captures the text.
     let filtered = [];
-    
-    // PASS 1: Identify large containers that should be discarded because they contain smaller clickable items
     for (let i = 0; i < candidates.length; i++) {
-      let c1 = candidates[i];
-      for (let j = 0; j < candidates.length; j++) {
-        if (i === j) continue;
-        let c2 = candidates[j];
-        
-        let overlapArea = 0;
-        let overlapX = Math.max(0, Math.min(c1.rect.right, c2.rect.right) - Math.max(c1.rect.left, c2.rect.left));
-        let overlapY = Math.max(0, Math.min(c1.rect.bottom, c2.rect.bottom) - Math.max(c1.rect.top, c2.rect.top));
-        if (overlapX > 0 && overlapY > 0) overlapArea = overlapX * overlapY;
-        
-        let c1SubsetOfC2 = overlapArea > 0.8 * c1.area;
-        if (c1SubsetOfC2) {
-           if (c1.priority >= 2 && c2.priority >= 1 && c2.priority <= c1.priority) {
-              c2.shouldDiscard = true;
-           }
-        }
-      }
-    }
-    
-    // PASS 2: Safely remove subsets (e.g. text nodes inside valid containers)
-    for (let i = 0; i < candidates.length; i++) {
-      let c1 = candidates[i];
-      if (c1.shouldDiscard) continue;
+      let child = candidates[i];
+      let shouldDiscard = false;
       
-      let isSubset = false;
-      for (let j = 0; j < candidates.length; j++) {
-        if (i === j) continue;
-        let c2 = candidates[j];
-        if (c2.shouldDiscard) continue; // Don't let discarded containers destroy text nodes!
-        
-        let overlapArea = 0;
-        let overlapX = Math.max(0, Math.min(c1.rect.right, c2.rect.right) - Math.max(c1.rect.left, c2.rect.left));
-        let overlapY = Math.max(0, Math.min(c1.rect.bottom, c2.rect.bottom) - Math.max(c1.rect.top, c2.rect.top));
-        if (overlapX > 0 && overlapY > 0) overlapArea = overlapX * overlapY;
-        
-        let c1SubsetOfC2 = overlapArea > 0.8 * c1.area;
-        let c2SubsetOfC1 = overlapArea > 0.8 * c2.area;
-        
-        if (c1SubsetOfC2 && c2SubsetOfC1) {
-           if (c2.priority > c1.priority) {
-              isSubset = true; break;
-           } else if (c2.priority === c1.priority && c2.area > c1.area) {
-              isSubset = true; break;
-           } else if (c2.priority === c1.priority && c2.area === c1.area && j < i) {
-              isSubset = true; break;
-           }
-        } else if (c1SubsetOfC2) {
-           if (c2.priority >= 2 && c1.priority === 0) {
-              isSubset = true; break;
-           }
-           if (c2.priority === 0 && c1.priority === 0) {
-              isSubset = true; break;
-           }
+      let ancestor = child.node.parentElement;
+      while (ancestor && ancestor !== document.body && ancestor !== document.documentElement) {
+        let parentCandidate = candidates.find(c => c.node === ancestor);
+        if (parentCandidate && (parentCandidate.prefix === 'BTN' || parentCandidate.prefix === 'LNK')) {
+          if (child.prefix === 'TXT') {
+             shouldDiscard = true;
+             break;
+          }
         }
+        ancestor = ancestor.parentElement;
       }
-      if (!isSubset) filtered.push(c1);
+      
+      if (!shouldDiscard) {
+        filtered.push(child);
+      }
     }
     
     const elements = [];
@@ -310,7 +273,13 @@
         ariaLabel:   node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '',
         role:        node.getAttribute('role') || node.tagName.toLowerCase(),
         src:         node.src || node.currentSrc || '',
+        alt:         node.alt || node.getAttribute('alt') || '',
+        checked:     node.checked || node.getAttribute('aria-checked') === 'true' || false,
+        disabled:    node.disabled || node.getAttribute('aria-disabled') === 'true' || false,
+        expanded:    node.getAttribute('aria-expanded') || '',
+        valuenow:    node.getAttribute('aria-valuenow') || '',
         parentContext: parentContext.trim(),
+        zone:        c.zone,
         hasChildren: node.querySelector('input,button,select,textarea') !== null,
         position:    { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
         zIndex:      zIndexVal,
