@@ -170,7 +170,7 @@ ${pageSummary}`;
     } else {
       // Fallback: build from raw elements — annotated with in-memory state and position
       const els = graph.elements || [];
-      const interactiveEls = els.filter(e =>
+      let interactiveEls = els.filter(e =>
         e.id && (e.id.startsWith('BTN') || e.id.startsWith('INP') || e.id.startsWith('LNK') || (e.id.startsWith('TXT') && e.text && e.text.length > 1))
       );
 
