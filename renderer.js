@@ -718,6 +718,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
   let isComplete = false;
   let previousActions = [];
   let currentStepIdx = 0;
+  let currentGraphQuery = null; // Agent's active targeted graph query
   let replanCount = 0;
   const MAX_REPLANS = 2;
   const MAX_ACTIONS_PER_STEP = 7;
@@ -836,12 +837,11 @@ Return ONLY a JSON array of question strings, nothing else.`;
           }
         }
 
-        const prunedGraph = await window.electronAPI.pruneGraph(activeGraph, currentStep);
         const memory = await window.electronAPI.recallMemory(currentStep, activeGraph.url);
         // Annotate graph elements with tracked state (no DOM re-read)
         const annotatedGraph = {
-          ...prunedGraph,
-          elements: (prunedGraph.elements || []).map(el => {
+          ...activeGraph,
+          elements: (activeGraph.elements || []).map(el => {
             const st = elementState.get(el.id);
             return st ? { ...el, _state: st } : el;
           }),
@@ -869,7 +869,7 @@ Return ONLY a JSON array of question strings, nothing else.`;
 
         streamDiv = null;
         const agentResponse = await window.electronAPI.agentChat(
-          contextualStep, annotatedGraph, previousActions, memory, [], taskScratchpad
+          contextualStep, annotatedGraph, previousActions, memory, [], taskScratchpad, currentGraphQuery
         );
         streamDiv = null;
 
@@ -1026,6 +1026,15 @@ Return ONLY a JSON array of question strings, nothing else.`;
           appendAiMessage(msg);
           taskScratchpad += `- ${note}\n`;
           previousActions.push(`Wrote to scratchpad: "${note}"`);
+          continue;
+
+        } else if (action === 'query_graph') {
+          const qt = args.type || '';
+          const qz = args.zone || '';
+          msg += `<br>🔍 Queried Knowledge Graph for: <em>${qt} ${qz ? 'in ' + qz : ''}</em>`;
+          appendAiMessage(msg);
+          currentGraphQuery = { type: qt, zone: qz };
+          previousActions.push(`Expectation: "${expectation}". Outcome: Graph filtered. See elements below.`);
           continue;
 
         } else if (action === 'extract_data') {

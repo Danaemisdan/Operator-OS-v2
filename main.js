@@ -10,7 +10,6 @@ const { classifyIntent } = require('./intent-classifier.js');
 const { matchSkill, extractArgs, skills } = require('./skills/_registry.js');
 const { executeSkill } = require('./skills/executor.js');
 const { decomposeGoal } = require('./manager-agent.js');
-const { pruneGraph } = require('./dom-pruner.js');
 const { recordEpisode, recallRelevant } = require('./memory.js');
 const { researchHeadless, searchLeads, lookupCompany, lookupApp, searchNews, extractPageData } = require('./research-agent.js');
 const { observePageState, recoverMissingElement } = require('./observer.js');
@@ -144,10 +143,10 @@ ipcMain.handle('analyze-ui-llm', async (event, graph) => {
   }
 });
 
-ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, memory, conversationHistory, pageSummary, taskScratchpad }) => {
+ipcMain.handle('agent-chat', async (event, { promptText, graph, previousActions, memory, conversationHistory, pageSummary, taskScratchpad, graphQuery }) => {
   try {
     const result = await chatAgentWithLLM(
-      prompt,
+      promptText,
       graph,
       previousActions || [],
       event.sender,
@@ -155,7 +154,8 @@ ipcMain.handle('agent-chat', async (event, { prompt, graph, previousActions, mem
       conversationHistory || [],
       false,
       pageSummary || '',
-      taskScratchpad || ''
+      taskScratchpad || '',
+      graphQuery || null
     );
     return result;
   } catch (error) {
@@ -227,10 +227,6 @@ ipcMain.handle('decompose-goal', async (event, { goal, currentUrl, pageContext }
   return await decomposeGoal(goal, skillNames, currentUrl, event.sender, pageContext || null);
 });
 
-// --- DOM Pruner ---
-ipcMain.handle('prune-graph', async (event, { graph, goalText }) => {
-  return pruneGraph(graph, goalText);
-});
 
 // --- Episodic Memory ---
 ipcMain.handle('recall-memory', async (event, { goal, url }) => {

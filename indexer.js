@@ -230,10 +230,12 @@
       const ariaLbl = node.getAttribute('aria-label') || node.getAttribute('aria-labelledby') || '';
       const titleLbl = node.getAttribute('title') || node.getAttribute('data-tooltip') || node.getAttribute('data-title') || '';
       const svgTitle = (() => { try { return node.querySelector('title')?.textContent || ''; } catch(_){return '';} })();
+      const childAlt = (() => { try { return node.querySelector('img, svg')?.getAttribute('alt') || node.querySelector('svg')?.getAttribute('aria-label') || ''; } catch(_){return '';} })();
+      const classHint = typeof node.className === 'string' && node.className.match(/(search|close|menu|settings|profile|cart|user)/i) ? node.className.match(/(search|close|menu|settings|profile|cart|user)/i)[0] : '';
       const innerTxt = (node.innerText || '').trim().replace(/\n/g,' ').replace(/\s+/g,' ').substring(0, 80);
       const altTxt   = node.alt || '';
-      // Prefer: aria-label > title > innerText > placeholder > alt
-      const text = (ariaLbl || titleLbl || innerTxt || svgTitle || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
+      // Prefer: aria-label > title > innerText > placeholder > child image alt > class hint > alt
+      const text = (ariaLbl || titleLbl || innerTxt || svgTitle || childAlt || classHint || node.placeholder || node.getAttribute('placeholder') || altTxt || '').trim();
       let parent = node.parentElement;
       let parentContext = '';
       let depth = 0;

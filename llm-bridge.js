@@ -155,7 +155,7 @@ function analyzeUIWithLLM(graph) {
 // ─── Main Agent Chat (with full conversation history for chat mode) ────────────
 // pageSummary: pre-computed heuristic llm_summary from explorePage() — use this
 // instead of raw elements when available. Shorter prompt = faster inference.
-async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '', taskScratchpad = '') {
+async function chatAgentWithLLM(promptText, graph, previousActions = [], sender, memory = '', conversationHistory = [], silent = false, pageSummary = '', taskScratchpad = '', graphQuery = null) {
   // Chat mode = no page context passed (empty graph). Executor mode = real graph provided.
   const isChatMode = !graph.elements || graph.elements.length === 0;
   let pageContext = '';
@@ -186,12 +186,29 @@ ${pageSummary}`;
         : '';
 
       // ── Build element list grouped by Zone ─────────────────
+      // Apply Graph Query if requested
+      if (graphQuery && graphQuery.type) {
+         if (graphQuery.type === 'inputs') interactiveEls = interactiveEls.filter(e => e.id.startsWith('INP'));
+         else if (graphQuery.type === 'buttons') interactiveEls = interactiveEls.filter(e => e.id.startsWith('BTN'));
+         else if (graphQuery.type === 'links') interactiveEls = interactiveEls.filter(e => e.id.startsWith('LNK'));
+         else if (graphQuery.type === 'text') interactiveEls = interactiveEls.filter(e => e.id.startsWith('TXT'));
+         
+         if (graphQuery.zone) {
+           const targetZone = graphQuery.zone.toLowerCase();
+           interactiveEls = interactiveEls.filter(e => (e.zone || '').toLowerCase().includes(targetZone));
+         }
+         interactiveEls = interactiveEls.slice(0, 150); // Generous limit for targeted queries
+      } else {
+         // Default Overview: Just show a small preview so the agent is forced to query for what it wants
+         interactiveEls = interactiveEls.slice(0, 30);
+      }
+
       // Group elements
       const zones = {};
-      interactiveEls.slice(0, 120).forEach(e => {
+      interactiveEls.forEach(e => {
         const z = e.zone || 'Main Content';
         if (!zones[z]) zones[z] = [];
-        zones[z].push(e);
+        if (zones[z].length < 50) zones[z].push(e); // Cap elements per zone to avoid overflow
       });
 
       const elLines = Object.entries(zones).map(([zoneName, els]) => {
@@ -212,7 +229,7 @@ ${pageSummary}`;
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
 - Page type: ${graph.semanticPattern || 'Unknown'}${overlayBlock}
-- Visible elements (${interactiveEls.length}): (Showing max 120 elements. Use scroll tool if what you need is not visible)
+- Visible elements (${interactiveEls.length}): (Showing ${graphQuery ? 'Filtered Query Results' : 'High-Level Preview'}. Use query_graph tool to find specific elements)
 ${elLines}`;
     }
   }
@@ -235,6 +252,7 @@ ${taskScratchpad || '(empty - write notes to yourself if needed)'}
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
+{"tool":"query_graph","args":{"type":"inputs|buttons|links|text","zone":"<optional zone name>"},"expectation":"<what you expect this to do>","status":"running"}
 {"tool":"navigate","args":{"text":"<full URL>"},"expectation":"<what you expect this to do>","status":"running"}
 {"tool":"click","args":{"targetId":"<element ID from the list above>"},"expectation":"<what you expect this to do>","status":"running"}
 {"tool":"type","args":{"targetId":"<element ID>","text":"<words to type>"},"expectation":"<what you expect this to do>","status":"running"}
