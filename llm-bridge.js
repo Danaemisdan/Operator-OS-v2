@@ -202,7 +202,8 @@ ${pageSummary}`;
                            st?.clicked ? ` [✓ CLICKED]` : '';
           const valStr = (!st?.typed && e.value) ? ` [current: "${e.value}"]` : '';
           const desc = e.predictedEffect || e._exploration?.purpose || e.role || '';
-          return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}`;
+          const ctxStr = e.parentContext ? ` (Inside: ${e.parentContext})` : '';
+          return `  [${e.id}] "${label}"${stateStr}${valStr} — ${desc}${ctxStr}`;
         }).join('\n');
         return `[${zoneName}]\n${zoneEls}`;
       }).join('\n\n');
@@ -211,7 +212,7 @@ ${pageSummary}`;
 - URL: ${graph.url || 'unknown'}
 - Title: ${graph.title || 'Unknown'}
 - Page type: ${graph.semanticPattern || 'Unknown'}${overlayBlock}
-- Visible elements (${interactiveEls.length}):
+- Visible elements (${interactiveEls.length}): (Showing max 120 elements. Use scroll tool if what you need is not visible)
 ${elLines}`;
     }
   }
@@ -234,15 +235,15 @@ ${taskScratchpad || '(empty - write notes to yourself if needed)'}
 RECENT: ${previousActions.length === 0 ? 'none' : previousActions.slice(-3).join(' │ ')}
 
 AVAILABLE ACTIONS — respond with exactly one JSON object:
-{"tool":"navigate","args":{"text":"<full URL>"},"status":"running"}
-{"tool":"click","args":{"targetId":"<element ID from the list above>"},"status":"running"}
-{"tool":"type","args":{"targetId":"<element ID>","text":"<the actual words to type>"},"status":"running"}
-{"tool":"press_enter","args":{},"status":"running"}
-{"tool":"scroll","args":{"text":"down"},"status":"running"}
-{"tool":"ask_user","args":{"text":"<question for the user>"},"status":"running"}
-{"tool":"scratchpad","args":{"text":"<notes about what you have tried, what failed, or what to do next>"},"status":"running"}
-{"tool":"extract_data","args":{"question":"<what information do you want to extract?>","targetId":"<OPTIONAL element ID to extract from a specific item>"},"status":"running"}
-{"tool":"reply","args":{"text":"<your answer to the user>"},"status":"complete"}
+{"tool":"navigate","args":{"text":"<full URL>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"click","args":{"targetId":"<element ID from the list above>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"type","args":{"targetId":"<element ID>","text":"<words to type>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"press_enter","args":{},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"scroll","args":{"text":"down"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"ask_user","args":{"text":"<question>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"scratchpad","args":{"text":"<notes>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"extract_data","args":{"question":"<what info>","targetId":"<OPTIONAL ID>"},"expectation":"<what you expect this to do>","status":"running"}
+{"tool":"reply","args":{"text":"<answer>"},"expectation":"<what you expect this to do>","status":"complete"}
 
 RULES:
 1. Output ONLY the raw JSON. No markdown blocks, no prose, no chat. Begin with {.

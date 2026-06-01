@@ -26,68 +26,52 @@ function pruneGraph(graph, goalText) {
     return graph || { elements: [] };
   }
 
-  // Tokenise the goal into meaningful words (longer than 3 characters)
-  const goalWords = (goalText || '')
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(w => w.length > 3);
+  const stepLower = (goalText || '').toLowerCase();
+  
+  // 1. Intent Classification
+  let intent = 'default';
+  if (stepLower.match(/\b(search|find|query|look for)\b/)) {
+    intent = 'search';
+  } else if (stepLower.match(/\b(login|sign in|auth|account|register)\b/)) {
+    intent = 'auth';
+  } else if (stepLower.match(/\b(filter|sort|refine)\b/)) {
+    intent = 'filter';
+  } else if (stepLower.match(/\b(extract|compare|read|view|list|top)\b/)) {
+    intent = 'content';
+  } else if (stepLower.match(/\b(navigate|go to|open)\b/)) {
+    intent = 'navigate';
+  }
 
-  // Noise words that indicate footer / legal content
-  const legalTerms = ['privacy', 'terms', 'cookie', 'copyright', 'legal'];
+  // 2. Zone Mapping
+  // Determine which chunk of the UI is most relevant to the intent
+  let targetZones = [];
+  if (intent === 'search' || intent === 'navigate') {
+    targetZones = ['Header', 'Header Area', 'Navigation', 'Main Content'];
+  } else if (intent === 'auth') {
+    targetZones = ['Main Content', 'Form Area', 'Header Area'];
+  } else if (intent === 'filter') {
+    targetZones = ['Sidebar', 'Main Content', 'Navigation'];
+  } else if (intent === 'content') {
+    targetZones = ['Main Content'];
+  } else {
+    // Default fallback
+    targetZones = ['Main Content', 'Header Area', 'Form Area'];
+  }
 
-  // Interactive element prefixes
-  const interactivePrefixes = ['BTN_', 'LNK_', 'INP_'];
-
-  // Non-interactive content prefixes
-  const contentPrefixes = ['TXT_', 'IMG_', 'VID_'];
-
-  const scored = graph.elements.map(el => {
-    let score = 0;
-    const text = (el.text || '').toLowerCase();
-    const id = el.id || '';
-
-    // +10 — interactive element
-    if (interactivePrefixes.some(p => id.startsWith(p))) {
-      score += 10;
-    }
-
-    // +5 per goal word found in element text
-    for (const word of goalWords) {
-      if (text.includes(word)) {
-        score += 5;
-      }
-    }
-
-    // +3 — not a legal/footer link
-    if (!legalTerms.some(term => text.includes(term))) {
-      score += 3;
-    }
-
-    // +2 — has a meaningful predictedEffect
-    if (el.predictedEffect && typeof el.predictedEffect === 'string' && el.predictedEffect.length > 5) {
-      score += 2;
-    }
-
-    // -5 — non-interactive content node
-    if (contentPrefixes.some(p => id.startsWith(p))) {
-      score -= 5;
-    }
-
-    // -3 — text too short or too long to be useful
-    if (text.length < 2 || text.length > 100) {
-      score -= 3;
-    }
-
-    return { el, score };
+  // 3. Filter Graph by Zone
+  // Overlays/Popups must ALWAYS bypass the filter so the agent can dismiss them!
+  const filtered = graph.elements.filter(el => {
+     if (el.isOverlay) return true;
+     // If the element's zone matches the intent's target zones, keep it.
+     // Also keep anything we explicitly labeled as 'Form Area' if searching or authing.
+     return targetZones.includes(el.zone) || !el.zone;
   });
 
-  // Sort descending and keep top 25
-  const top = scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 25)
-    .map(s => s.el);
+  // Sort them spatially (top to bottom) so it reads naturally
+  filtered.sort((a, b) => (a.position?.y || 0) - (b.position?.y || 0));
 
-  return { ...graph, elements: top };
+  // Cap at 150 elements for the specific chunk to prevent token overflow
+  return { ...graph, elements: filtered.slice(0, 150), intent, targetZones };
 }
 
 module.exports = { pruneGraph };
