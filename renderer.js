@@ -540,6 +540,8 @@ async function handleChatSubmit() {
     lucide.createIcons();
     await window.electronAPI.startResearch(goalText);
     return;
+  }
+  
   // ─── OS Vision Overlay Drawer ────
   function drawVisionOverlay(elements) {
     const overlayContainer = document.getElementById('os-vision-overlay');
@@ -643,12 +645,21 @@ async function handleChatSubmit() {
             el.predictedEffect = analysis.predictions[el.id];
           }
         });
+        activeGraph = parsed;
+
+        // ── Exploration Agent
+        try {
+          const domain = new URL(parsed.url.startsWith('http') ? parsed.url : 'https://' + parsed.url).hostname;
+          const exploration = await window.electronAPI.explorePage({ graph: parsed, domain });
+          if (exploration && exploration.enrichedElements) {
+            activeGraph.elements = exploration.enrichedElements;
+            activeGraph._exploration = exploration.pageKnowledge;
+          }
+        } catch (_) {}
+
+      } catch (e) {
+        console.warn('[refreshActiveGraph] DOM mapping failed:', e.message);
       }
-      
-      activeGraph = parsed;
-    } catch (e) {
-      console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
-      activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
     }
   }
 
@@ -1206,116 +1217,46 @@ Return ONLY a JSON array of question strings, nothing else.`;
           const el = activeGraph.elements.find(e => e.id === targetId);
 
           const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
+          const domBefore = JSON.stringify(activeGraph.elements);
 
-          if (isDesktopMode) {
-            if (el && el.bounds) {
-              const x = Math.round(el.bounds.x + el.bounds.width / 2);
-              const y = Math.round(el.bounds.y + el.bounds.height / 2);
-              msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
+          if (isDesktopMode && el && el.bounds) {
+            const x = Math.round(el.bounds.x + el.bounds.width / 2);
+            const y = Math.round(el.bounds.y + el.bounds.height / 2);
+            msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
-              const domBefore = JSON.stringify(activeGraph.elements);
-
-              if (action === 'type') {
-                await window.electronAPI.osAction({ action: 'type', x, y, text: args.text || '' });
-              } else {
-                await window.electronAPI.osAction({ action: 'click', x, y });
-              }
-
-              if (action === 'click') await delay(2000);
-              else await delay(1200);
-              await refreshActiveGraph(wv);
-            }
-          } else {
-            if (el && el.position) {
-              const x = Math.round(el.position.x + el.position.width / 2);
-              const y = Math.round(el.position.y + el.position.height / 2);
-              msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
-
-              const domBefore = JSON.stringify(activeGraph.elements);
-
-              if (action === 'type') {
-                // Step 1: Click the element to focus it
-                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
-                await delay(200);
-                // Step 2: Reliably clear the input field via JS before typing
-                await window.electronAPI.executeAction({
-                  webContentsId: wv.getWebContentsId(),
-                  action: 'execute_js',
-                  payload: { code: `(() => { const el = document.querySelector('[data-op-id="${targetId}"]'); if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } })();` }
-                });
-                await delay(100);
-                // Step 3: Type the new text
-                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'type', payload: { x, y, text: args.text || '' } });
-              } else {
-                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
-              }
-
-              if (action === 'click') await waitForPageLoad(wv, 4000);
-              else await delay(1200);
-              await refreshActiveGraph(wv);
-            }
-          }
-
-            const urlNow = wv.src || '';
-            const domAfter = JSON.stringify(activeGraph.elements);
-
-            let outcome = `Executed ${action} on ${targetId}. `;
             if (action === 'type') {
-              outcome += `Typed "${(args.text || '').substring(0, 60)}" into ${targetId}. `;
-              outcome += `FIELD ${targetId} NOW CONTAINS: "${(args.text || '')}". DO NOT type into this field again. Next: press_enter or click submit.`;
-              elementState.set(targetId, { typed: true, value: args.text || '' });
-            } else if (action === 'click') {
-              elementState.set(targetId, { clicked: true });
-            }
-            if (urlNow !== urlBefore) {
-              outcome += `URL changed. `;
-              elementState.clear(); // new page = fresh element state
-            } else if (action !== 'type' && domBefore !== domAfter) {
-              outcome += `DOM changed (content updated/modal/autocomplete appeared). `;
+              await window.electronAPI.osAction({ action: 'type', x, y, text: args.text || '' });
+            } else {
+              await window.electronAPI.osAction({ action: 'click', x, y });
             }
 
-            previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
+            if (action === 'click') await delay(2000);
+            else await delay(1200);
+            await refreshActiveGraph(wv);
+            
+          } else if (!isDesktopMode && el && el.position) {
+            const x = Math.round(el.position.x + el.position.width / 2);
+            const y = Math.round(el.position.y + el.position.height / 2);
+            msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
-            // ── Behavioral Learning: record what this element did ─────────────────
-            // Builds the site knowledge graph over time — no LLM needed.
-            if (action === 'click' && (urlNow !== urlBefore || domBefore !== domAfter)) {
-              const newElements = activeGraph.elements.filter(e =>
-                !JSON.parse(domBefore).find(old => old.id === e.id)
-              );
-              try {
-                const domain = new URL(urlBefore.startsWith('http') ? urlBefore : 'https://' + urlBefore).hostname;
-                window.electronAPI.recordBehavior({
-                  domain,
-                  url: urlBefore,
-                  elementId: targetId,
-                  elementText: el.text || '',
-                  elementCategory: el._exploration?.category || 'unknown',
-                  action: 'click',
-                  resultUrl: urlNow,
-                  resultPagePurpose: activeGraph._exploration?.purpose || 'unknown',
-                  resultElementsAppeared: newElements.slice(0, 8),
-                }).catch(() => {});
-              } catch (_) {}
-            }
-
-            // ── Observer: feed real state back to planner after DOM change ─────────
-            if (domBefore !== domAfter || urlNow !== urlBefore) {
-              const actObs = await window.electronAPI.observePage({
-                graph: activeGraph,
-                lastAction: `${action} ${targetId}${action === 'type' ? ' with text: ' + (args.text || '') : ''}`,
-                expectation,
-                goalContext: enrichedGoal,
+            if (action === 'type') {
+              await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
+              await delay(200);
+              await window.electronAPI.executeAction({
+                webContentsId: wv.getWebContentsId(),
+                action: 'execute_js',
+                payload: { code: `(() => { const el = document.querySelector('[data-op-id="${targetId}"]'); if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } })();` }
               });
-              if (actObs.blockers && actObs.blockers.length > 0) {
-                const b = actObs.blockers.join(', ');
-                appendAiMessage(`⚠️ Blocker appeared: <strong>${b}</strong>`);
-                previousActions.push(`BLOCKER: ${b}. You MUST handle this first. ${actObs.next_hint}`);
-              } else {
-                previousActions.push(`Observer state: ${actObs.state}. ${actObs.what_changed}. Hint: ${actObs.next_hint}`);
-              }
+              await delay(100);
+              await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'type', payload: { x, y, text: args.text || '' } });
+            } else {
+              await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
             }
 
-            await window.electronAPI.recordMemory({ goal: currentStep, url: urlBefore, action: `${action} ${targetId}`, outcome: 'success', detail: outcome });
+            if (action === 'click') await waitForPageLoad(wv, 4000);
+            else await delay(1200);
+            await refreshActiveGraph(wv);
+            
           } else {
             // ── RECOVERY AGENT: element not found — try to find an alternative ──
             appendAiMessage(`⚠️ <code>${targetId}</code> not in DOM. Calling Recovery Agent...`);
@@ -1328,32 +1269,78 @@ Return ONLY a JSON array of question strings, nothing else.`;
             });
             if (recovery.found && recovery.target_id) {
               appendAiMessage(`🔧 Recovery found alternative: <code>${recovery.target_id}</code> ("${recovery.target_text}") — ${recovery.reasoning}`);
-              // Re-run the action on the recovered element
               const recEl = activeGraph.elements.find(e => e.id === recovery.target_id);
-              const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
-              if (isDesktopMode) {
-                if (recEl && recEl.bounds) {
-                  const rx = Math.round(recEl.bounds.x + recEl.bounds.width / 2);
-                  const ry = Math.round(recEl.bounds.y + recEl.bounds.height / 2);
-                  await window.electronAPI.osAction({ action: 'click', x: rx, y: ry });
-                  await delay(2000);
-                  await refreshActiveGraph(wv);
-                  previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
-                }
-              } else {
-                if (recEl && recEl.position) {
-                  const rx = Math.round(recEl.position.x + recEl.position.width / 2);
-                  const ry = Math.round(recEl.position.y + recEl.position.height / 2);
-                  await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x: rx, y: ry } });
-                  await waitForPageLoad(wv, 4000);
-                  await refreshActiveGraph(wv);
-                  previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
-                }
+              if (isDesktopMode && recEl && recEl.bounds) {
+                const rx = Math.round(recEl.bounds.x + recEl.bounds.width / 2);
+                const ry = Math.round(recEl.bounds.y + recEl.bounds.height / 2);
+                await window.electronAPI.osAction({ action: 'click', x: rx, y: ry });
+                await delay(2000);
+                await refreshActiveGraph(wv);
+                previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
+              } else if (!isDesktopMode && recEl && recEl.position) {
+                const rx = Math.round(recEl.position.x + recEl.position.width / 2);
+                const ry = Math.round(recEl.position.y + recEl.position.height / 2);
+                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x: rx, y: ry } });
+                await waitForPageLoad(wv, 4000);
+                await refreshActiveGraph(wv);
+                previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
               }
             } else {
               previousActions.push(`${targetId} not found, Recovery Agent found no substitute. Try a different approach or scroll to find it.`);
             }
+            continue; // Skip the post-action tracking if it failed or ran recovery
           }
+
+          // --- POST ACTION TRACKING (runs if click/type succeeded on main branch) ---
+          const urlNow = wv.src || '';
+          const domAfter = JSON.stringify(activeGraph.elements);
+
+          let outcome = `Executed ${action} on ${targetId}. `;
+          if (action === 'type') {
+            outcome += `Typed "${(args.text || '').substring(0, 60)}" into ${targetId}. `;
+            outcome += `FIELD ${targetId} NOW CONTAINS: "${(args.text || '')}". DO NOT type into this field again. Next: press_enter or click submit.`;
+            elementState.set(targetId, { typed: true, value: args.text || '' });
+          } else if (action === 'click') {
+            elementState.set(targetId, { clicked: true });
+          }
+          if (urlNow !== urlBefore) {
+            outcome += `URL changed. `;
+            elementState.clear(); // new page = fresh element state
+          } else if (action !== 'type' && domBefore !== domAfter) {
+            outcome += `DOM changed (content updated/modal/autocomplete appeared). `;
+          }
+
+          previousActions.push(`Expectation: "${expectation}". Outcome: ${outcome}`);
+
+          if (action === 'click' && (urlNow !== urlBefore || domBefore !== domAfter)) {
+            const newElements = activeGraph.elements.filter(e =>
+              !JSON.parse(domBefore).find(old => old.id === e.id)
+            );
+            try {
+              const domain = new URL(urlBefore.startsWith('http') ? urlBefore : 'https://' + urlBefore).hostname;
+              window.electronAPI.recordBehavior({
+                domain, url: urlBefore, elementId: targetId,
+                elementText: el.text || '', elementCategory: el._exploration?.category || 'unknown',
+                action: 'click', resultUrl: urlNow, resultPagePurpose: activeGraph._exploration?.purpose || 'unknown',
+                resultElementsAppeared: newElements.slice(0, 8),
+              }).catch(() => {});
+            } catch (_) {}
+          }
+
+          if (domBefore !== domAfter || urlNow !== urlBefore) {
+            const actObs = await window.electronAPI.observePage({
+              graph: activeGraph, lastAction: `${action} ${targetId}${action === 'type' ? ' with text: ' + (args.text || '') : ''}`,
+              expectation, goalContext: enrichedGoal,
+            });
+            if (actObs.blockers && actObs.blockers.length > 0) {
+              const b = actObs.blockers.join(', ');
+              appendAiMessage(`⚠️ Blocker appeared: <strong>${b}</strong>`);
+              previousActions.push(`BLOCKER: ${b}. You MUST handle this first. ${actObs.next_hint}`);
+            } else {
+              previousActions.push(`Observer state: ${actObs.state}. ${actObs.what_changed}. Hint: ${actObs.next_hint}`);
+            }
+          }
+          await window.electronAPI.recordMemory({ goal: currentStep, url: urlBefore, action: `${action} ${targetId}`, outcome: 'success', detail: outcome });
 
         } else if (action === 'press_enter') {
           // Submit forms, confirm searches, send messages
