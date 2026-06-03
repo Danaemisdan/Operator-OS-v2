@@ -434,16 +434,22 @@ function drawVisionOverlay(elements) {
   
   overlayContainer.replaceChildren(); // clear old boxes
   
-  // Create a shadow root or fragment to append elements efficiently
+  // Calculate the global screen position of the overlay container
+  const rect = overlayContainer.getBoundingClientRect();
+  // window.screenX/Y gives window position, rect gives container offset inside window
+  // macOS top bar offset might be slightly different, but this is extremely close.
+  const offsetX = window.screenX + rect.left;
+  const offsetY = window.screenY + rect.top;
+
   const fragment = document.createDocumentFragment();
-  
+
   elements.forEach(el => {
     if (!el.bounds) return;
     
     const box = document.createElement('div');
     box.style.position = 'absolute';
-    box.style.left = el.bounds.x + 'px';
-    box.style.top = el.bounds.y + 'px';
+    box.style.left = (el.bounds.x - offsetX) + 'px';
+    box.style.top = (el.bounds.y - offsetY) + 'px';
     box.style.width = el.bounds.width + 'px';
     box.style.height = el.bounds.height + 'px';
     box.style.border = '2px solid rgba(16, 185, 129, 0.7)'; // Tailwind emerald-500

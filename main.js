@@ -147,13 +147,16 @@ async function getVisionWorker() {
 // --- Phase 8: Pure Node.js Zero-Server OS Vision Pipeline ---
 ipcMain.handle('get-vision-tree', async () => {
   try {
+    const { screen, systemPreferences } = require('electron');
     const isMac = process.platform === 'darwin';
     if (isMac) {
-      const { systemPreferences } = require('electron');
-      const status = systemPreferences.getMediaAccessStatus('screen');
-      console.log("[getVisionTree] macOS Screen Recording Permission Status:", status);
+      console.log("[getVisionTree] macOS Screen Recording Permission Status:", systemPreferences.getMediaAccessStatus('screen'));
     }
     
+    const display = screen.getPrimaryDisplay();
+    const screenBounds = display.bounds; // {width, height} in CSS pixels
+    
+    // We request a 1920x1080 thumbnail, but desktopCapturer maintains aspect ratio.
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'], 
       thumbnailSize: { width: 1920, height: 1080 } 
@@ -162,8 +165,13 @@ ipcMain.handle('get-vision-tree', async () => {
     if (sources.length === 0) return [];
 
     const primaryScreen = sources[0];
+    const thumbSize = primaryScreen.thumbnail.getSize(); // actual dimensions captured
     const imageBuffer = primaryScreen.thumbnail.toPNG();
-    console.log(`[getVisionTree] Captured thumbnail: ${imageBuffer.length} bytes`);
+    console.log(`[getVisionTree] Captured thumbnail: ${thumbSize.width}x${thumbSize.height} (${imageBuffer.length} bytes)`);
+
+    // Calculate scale factors from Thumbnail Space -> CSS Screen Space
+    const scaleX = screenBounds.width / thumbSize.width;
+    const scaleY = screenBounds.height / thumbSize.height;
 
     // Run Tesseract OCR using persistent worker to get blocks
     console.log("[getVisionTree] Running Tesseract OCR...");
@@ -197,10 +205,10 @@ ipcMain.handle('get-vision-tree', async () => {
             text: w.text.trim(),
             role: 'text',
             bounds: {
-              x: w.bbox.x0,
-              y: w.bbox.y0,
-              width: w.bbox.x1 - w.bbox.x0,
-              height: w.bbox.y1 - w.bbox.y0
+              x: w.bbox.x0 * scaleX,
+              y: w.bbox.y0 * scaleY,
+              width: (w.bbox.x1 - w.bbox.x0) * scaleX,
+              height: (w.bbox.y1 - w.bbox.y0) * scaleY
             }
           });
         }
