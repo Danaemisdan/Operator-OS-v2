@@ -389,7 +389,7 @@ btnModeBrowser.addEventListener('click', () => {
   if (osOverlay) osOverlay.style.display = 'none'; // hide OS labels
 });
 
-btnModeDesktop.addEventListener('click', () => {
+btnModeDesktop.addEventListener('click', async () => {
   btnModeDesktop.classList.add('active');
   btnModeBrowser.classList.remove('active');
   btnModeDesktop.style.background = '#6366f1';
@@ -401,6 +401,9 @@ btnModeDesktop.addEventListener('click', () => {
   
   const osOverlay = document.getElementById('os-vision-overlay');
   if (osOverlay) osOverlay.style.display = 'block'; // show OS labels
+  
+  // Force a re-scan of the desktop immediately
+  await refreshActiveGraph(wv);
 });
 
 // Chat Logic & Planner Agent Loop
@@ -415,6 +418,127 @@ function pushToHistory(userMsg, assistantMsg) {
   // Trim to keep last MAX_HISTORY_TURNS messages (pairs)
   while (conversationHistory.length > MAX_HISTORY_TURNS * 2) {
     conversationHistory.splice(0, 2);
+  }
+}
+
+// ─── OS Vision Overlay Drawer ────
+function drawVisionOverlay(elements) {
+  const overlayContainer = document.getElementById('os-vision-overlay');
+  if (!overlayContainer) return;
+  
+  overlayContainer.replaceChildren(); // clear old boxes
+  
+  // Create a shadow root or fragment to append elements efficiently
+  const fragment = document.createDocumentFragment();
+  
+  elements.forEach(el => {
+    if (!el.bounds) return;
+    
+    const box = document.createElement('div');
+    box.style.position = 'absolute';
+    box.style.left = el.bounds.x + 'px';
+    box.style.top = el.bounds.y + 'px';
+    box.style.width = el.bounds.width + 'px';
+    box.style.height = el.bounds.height + 'px';
+    box.style.border = '2px solid rgba(16, 185, 129, 0.7)'; // Tailwind emerald-500
+    box.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+    box.style.boxSizing = 'border-box';
+    box.style.pointerEvents = 'none';
+    box.style.zIndex = '999999';
+    box.style.borderRadius = '3px';
+    
+    const label = document.createElement('div');
+    label.textContent = el.id;
+    label.style.position = 'absolute';
+    label.style.top = '-18px';
+    label.style.left = '-2px';
+    label.style.backgroundColor = 'rgba(16, 185, 129, 0.9)';
+    label.style.color = '#fff';
+    label.style.fontSize = '10px';
+    label.style.fontWeight = 'bold';
+    label.style.padding = '2px 4px';
+    label.style.borderRadius = '3px';
+    label.style.whiteSpace = 'nowrap';
+    label.style.fontFamily = 'monospace';
+    
+    box.appendChild(label);
+    fragment.appendChild(box);
+  });
+  
+  overlayContainer.appendChild(fragment);
+}
+
+// ─── refreshActiveGraph: Dual Mode (Browser or OS Desktop) ────
+async function refreshActiveGraph(wv) {
+  const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
+
+  if (isDesktopMode) {
+    try {
+      // Get bounding boxes of clickable text on screen using Tesseract.js via Main IPC
+      const visionElements = await window.electronAPI.getVisionTree();
+      
+      const parsed = {
+        url: 'OS Desktop',
+        title: 'Native Environment',
+        semanticPattern: 'Desktop UI',
+        elements: visionElements
+      };
+      
+      // Enrich with semantic analysis if needed
+      if (visionElements.length > 0) {
+        const analysis = await window.electronAPI.analyzeUI(parsed);
+        parsed.elements.forEach(el => {
+          if (analysis.predictions && analysis.predictions[el.id]) {
+            el.predictedEffect = analysis.predictions[el.id];
+          }
+        });
+      }
+      
+      activeGraph = parsed;
+      
+      // Draw the labels on the transparent Electron window!
+      drawVisionOverlay(visionElements);
+      
+    } catch (e) {
+      console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
+      activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
+      drawVisionOverlay([]); // Clear boxes on error
+    }
+  } else {
+    // ── BROWSER MODE: DOM Indexer ──
+    try {
+      if (!wv || wv.getWebContentsId == null) return;
+      const response = await fetch('indexer.js');
+      const scriptText = await response.text();
+      const resultJson = await wv.executeJavaScript(`
+        try { ${scriptText} } catch(e) { JSON.stringify({error: e.message}); }
+      `);
+      if (!resultJson) return;
+      const parsed = JSON.parse(resultJson);
+      if (parsed.error) return;
+      // Enrich with semantic analysis
+      const analysis = await window.electronAPI.analyzeUI(parsed);
+      parsed.semanticPattern = analysis.semanticPattern;
+      parsed.elements.forEach(el => {
+        if (analysis.predictions && analysis.predictions[el.id]) {
+          el.predictedEffect = analysis.predictions[el.id];
+        }
+      });
+      activeGraph = parsed;
+
+      // ── Exploration Agent
+      try {
+        const domain = new URL(parsed.url.startsWith('http') ? parsed.url : 'https://' + parsed.url).hostname;
+        const exploration = await window.electronAPI.explorePage({ graph: parsed, domain });
+        if (exploration && exploration.enrichedElements) {
+          activeGraph.elements = exploration.enrichedElements;
+          activeGraph._exploration = exploration.pageKnowledge;
+        }
+      } catch (_) {}
+
+    } catch (e) {
+      console.warn('[refreshActiveGraph] DOM mapping failed:', e.message);
+    }
   }
 }
 
@@ -541,127 +665,7 @@ async function handleChatSubmit() {
     await window.electronAPI.startResearch(goalText);
     return;
   }
-  
-  // ─── OS Vision Overlay Drawer ────
-  function drawVisionOverlay(elements) {
-    const overlayContainer = document.getElementById('os-vision-overlay');
-    if (!overlayContainer) return;
-    
-    overlayContainer.replaceChildren(); // clear old boxes
-    
-    // Create a shadow root or fragment to append elements efficiently
-    const fragment = document.createDocumentFragment();
-    
-    elements.forEach(el => {
-      if (!el.bounds) return;
-      
-      const box = document.createElement('div');
-      box.style.position = 'absolute';
-      box.style.left = el.bounds.x + 'px';
-      box.style.top = el.bounds.y + 'px';
-      box.style.width = el.bounds.width + 'px';
-      box.style.height = el.bounds.height + 'px';
-      box.style.border = '2px solid rgba(16, 185, 129, 0.7)'; // Tailwind emerald-500
-      box.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-      box.style.boxSizing = 'border-box';
-      box.style.pointerEvents = 'none';
-      box.style.zIndex = '999999';
-      box.style.borderRadius = '3px';
-      
-      const label = document.createElement('div');
-      label.textContent = el.id;
-      label.style.position = 'absolute';
-      label.style.top = '-18px';
-      label.style.left = '-2px';
-      label.style.backgroundColor = 'rgba(16, 185, 129, 0.9)';
-      label.style.color = '#fff';
-      label.style.fontSize = '10px';
-      label.style.fontWeight = 'bold';
-      label.style.padding = '2px 4px';
-      label.style.borderRadius = '3px';
-      label.style.whiteSpace = 'nowrap';
-      label.style.fontFamily = 'monospace';
-      
-      box.appendChild(label);
-      fragment.appendChild(box);
-    });
-    
-    overlayContainer.appendChild(fragment);
-  }
 
-  // ─── refreshActiveGraph: Dual Mode (Browser or OS Desktop) ────
-  async function refreshActiveGraph(wv) {
-    const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
-
-    if (isDesktopMode) {
-      try {
-        // Get bounding boxes of clickable text on screen using Tesseract.js via Main IPC
-        const visionElements = await window.electronAPI.getVisionTree();
-        
-        const parsed = {
-          url: 'OS Desktop',
-          title: 'Native Environment',
-          semanticPattern: 'Desktop UI',
-          elements: visionElements
-        };
-        
-        // Enrich with semantic analysis if needed
-        if (visionElements.length > 0) {
-          const analysis = await window.electronAPI.analyzeUI(parsed);
-          parsed.elements.forEach(el => {
-            if (analysis.predictions && analysis.predictions[el.id]) {
-              el.predictedEffect = analysis.predictions[el.id];
-            }
-          });
-        }
-        
-        activeGraph = parsed;
-        
-        // Draw the labels on the transparent Electron window!
-        drawVisionOverlay(visionElements);
-        
-      } catch (e) {
-        console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
-        activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
-        drawVisionOverlay([]); // Clear boxes on error
-      }
-    } else {
-      // ── BROWSER MODE: DOM Indexer ──
-      try {
-        if (!wv || wv.getWebContentsId == null) return;
-        const response = await fetch('indexer.js');
-        const scriptText = await response.text();
-        const resultJson = await wv.executeJavaScript(`
-          try { ${scriptText} } catch(e) { JSON.stringify({error: e.message}); }
-        `);
-        if (!resultJson) return;
-        const parsed = JSON.parse(resultJson);
-        if (parsed.error) return;
-        // Enrich with semantic analysis
-        const analysis = await window.electronAPI.analyzeUI(parsed);
-        parsed.semanticPattern = analysis.semanticPattern;
-        parsed.elements.forEach(el => {
-          if (analysis.predictions && analysis.predictions[el.id]) {
-            el.predictedEffect = analysis.predictions[el.id];
-          }
-        });
-        activeGraph = parsed;
-
-        // ── Exploration Agent
-        try {
-          const domain = new URL(parsed.url.startsWith('http') ? parsed.url : 'https://' + parsed.url).hostname;
-          const exploration = await window.electronAPI.explorePage({ graph: parsed, domain });
-          if (exploration && exploration.enrichedElements) {
-            activeGraph.elements = exploration.enrichedElements;
-            activeGraph._exploration = exploration.pageKnowledge;
-          }
-        } catch (_) {}
-
-      } catch (e) {
-        console.warn('[refreshActiveGraph] DOM mapping failed:', e.message);
-      }
-    }
-  }
 
   // ─── askUser: pause and show an input prompt ──────────────────────────────
   function askUser(question) {
