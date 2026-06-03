@@ -135,20 +135,58 @@ ipcMain.handle('save-knowledge', (event, { domain, elements }) => {
   return true;
 });
 
+let visionWorker = null;
+async function getVisionWorker() {
+  if (!visionWorker) {
+    const Tesseract = require('tesseract.js');
+    visionWorker = await Tesseract.createWorker('eng');
+  }
+  return visionWorker;
+}
+
 // --- Phase 8: Pure Node.js Zero-Server OS Vision Pipeline ---
 ipcMain.handle('get-vision-tree', async () => {
   try {
+    const isMac = process.platform === 'darwin';
+    if (isMac) {
+      const { systemPreferences } = require('electron');
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      console.log("[getVisionTree] macOS Screen Recording Permission Status:", status);
+    }
+    
     const sources = await desktopCapturer.getSources({ 
       types: ['screen'], 
       thumbnailSize: { width: 1920, height: 1080 } 
     });
+    console.log("[getVisionTree] Found", sources.length, "screens");
     if (sources.length === 0) return [];
 
     const primaryScreen = sources[0];
     const imageBuffer = primaryScreen.thumbnail.toPNG();
+    console.log(`[getVisionTree] Captured thumbnail: ${imageBuffer.length} bytes`);
 
-    // Run Tesseract OCR in-memory on the screenshot
-    const { data: { words } } = await Tesseract.recognize(imageBuffer, 'eng');
+    // Run Tesseract OCR using persistent worker to get blocks
+    console.log("[getVisionTree] Running Tesseract OCR...");
+    const worker = await getVisionWorker();
+    const { data } = await worker.recognize(imageBuffer, {}, { blocks: true });
+    
+    let words = [];
+    if (data && data.blocks) {
+      data.blocks.forEach(block => {
+        if (block.paragraphs) {
+          block.paragraphs.forEach(para => {
+            if (para.lines) {
+              para.lines.forEach(line => {
+                if (line.words) {
+                  words.push(...line.words);
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+    console.log("[getVisionTree] Tesseract found", words.length, "words");
     
     let elements = [];
     if (words && Array.isArray(words)) {
