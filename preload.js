@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeAction:  (p) => ipcRenderer.invoke('execute-action', p),
   extractText:    (p) => ipcRenderer.invoke('extract-text', p),
   analyzeUI:      (g) => ipcRenderer.invoke('analyze-ui-llm', g),
+  setVibrancy:    (mode) => ipcRenderer.invoke('set-vibrancy', mode),
 
   // Agent
   agentChat:      (prompt, graph, prev, memory, hist, scratchpad, memorypad, query) => ipcRenderer.invoke('agent-chat', { promptText: prompt, graph, previousActions: prev, memory, conversationHistory: hist, taskScratchpad: scratchpad, memorypad, graphQuery: query }),

@@ -135,6 +135,13 @@ ipcMain.handle('save-knowledge', (event, { domain, elements }) => {
   return true;
 });
 
+ipcMain.handle('set-vibrancy', (event, mode) => {
+  if (mainWindow) {
+    mainWindow.setVibrancy(mode ? 'fullscreen-ui' : null);
+  }
+  return true;
+});
+
 let visionWorker = null;
 async function getVisionWorker() {
   if (!visionWorker) {

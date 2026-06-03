@@ -382,6 +382,9 @@ btnModeBrowser.addEventListener('click', () => {
   btnModeBrowser.style.color = 'white';
   btnModeDesktop.style.background = 'transparent';
   btnModeDesktop.style.color = '#a1a1aa';
+  
+  window.electronAPI.setVibrancy(true); // Restore frosted glass
+  
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'flex'; // show browser view
   
@@ -399,6 +402,9 @@ btnModeDesktop.addEventListener('click', async () => {
   btnModeDesktop.style.color = 'white';
   btnModeBrowser.style.background = 'transparent';
   btnModeBrowser.style.color = '#a1a1aa';
+  
+  window.electronAPI.setVibrancy(false); // Make window completely transparent to see OS desktop
+  
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'none'; // hide browser view
   
