@@ -371,6 +371,32 @@ btnNewTab.addEventListener('click', () => {
   createTab();
 });
 
+// Mode Toggles
+const btnModeBrowser = document.getElementById('btn-mode-browser');
+const btnModeDesktop = document.getElementById('btn-mode-desktop');
+
+btnModeBrowser.addEventListener('click', () => {
+  btnModeBrowser.classList.add('active');
+  btnModeDesktop.classList.remove('active');
+  btnModeBrowser.style.background = '#6366f1';
+  btnModeBrowser.style.color = 'white';
+  btnModeDesktop.style.background = 'transparent';
+  btnModeDesktop.style.color = '#a1a1aa';
+  const wv = getActiveWebview();
+  if (wv) wv.style.display = 'flex'; // show browser view
+});
+
+btnModeDesktop.addEventListener('click', () => {
+  btnModeDesktop.classList.add('active');
+  btnModeBrowser.classList.remove('active');
+  btnModeDesktop.style.background = '#6366f1';
+  btnModeDesktop.style.color = 'white';
+  btnModeBrowser.style.background = 'transparent';
+  btnModeBrowser.style.color = '#a1a1aa';
+  const wv = getActiveWebview();
+  if (wv) wv.style.display = 'none'; // hide browser view, reveal desktop behind the transparent window
+});
+
 // Chat Logic & Planner Agent Loop
 // Rolling conversation history — persists across chat turns so model has full context
 const conversationHistory = [];
@@ -510,22 +536,52 @@ async function handleChatSubmit() {
     return;
   }
 
-  // ─── refreshActiveGraph: uses Zero-Server Computer Vision to map the OS ────
-  async function refreshActiveGraph() {
-    try {
-      // Get bounding boxes of clickable text on screen using Tesseract.js via Main IPC
-      const visionElements = await window.electronAPI.getVisionTree();
-      
-      const parsed = {
-        url: 'OS Desktop',
-        title: 'Native Environment',
-        semanticPattern: 'Desktop UI',
-        elements: visionElements
-      };
-      
-      // Enrich with semantic analysis if needed
-      if (visionElements.length > 0) {
+  // ─── refreshActiveGraph: Dual Mode (Browser or OS Desktop) ────
+  async function refreshActiveGraph(wv) {
+    const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
+
+    if (isDesktopMode) {
+      try {
+        // Get bounding boxes of clickable text on screen using Tesseract.js via Main IPC
+        const visionElements = await window.electronAPI.getVisionTree();
+        
+        const parsed = {
+          url: 'OS Desktop',
+          title: 'Native Environment',
+          semanticPattern: 'Desktop UI',
+          elements: visionElements
+        };
+        
+        // Enrich with semantic analysis if needed
+        if (visionElements.length > 0) {
+          const analysis = await window.electronAPI.analyzeUI(parsed);
+          parsed.elements.forEach(el => {
+            if (analysis.predictions && analysis.predictions[el.id]) {
+              el.predictedEffect = analysis.predictions[el.id];
+            }
+          });
+        }
+        
+        activeGraph = parsed;
+      } catch (e) {
+        console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
+        activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
+      }
+    } else {
+      // ── BROWSER MODE: DOM Indexer ──
+      try {
+        if (!wv || wv.getWebContentsId == null) return;
+        const response = await fetch('indexer.js');
+        const scriptText = await response.text();
+        const resultJson = await wv.executeJavaScript(`
+          try { ${scriptText} } catch(e) { JSON.stringify({error: e.message}); }
+        `);
+        if (!resultJson) return;
+        const parsed = JSON.parse(resultJson);
+        if (parsed.error) return;
+        // Enrich with semantic analysis
         const analysis = await window.electronAPI.analyzeUI(parsed);
+        parsed.semanticPattern = analysis.semanticPattern;
         parsed.elements.forEach(el => {
           if (analysis.predictions && analysis.predictions[el.id]) {
             el.predictedEffect = analysis.predictions[el.id];
@@ -1093,22 +1149,56 @@ Return ONLY a JSON array of question strings, nothing else.`;
           const targetId = (args.targetId || '').trim();
           const el = activeGraph.elements.find(e => e.id === targetId);
 
-          if (el && el.bounds) {
-            const x = Math.round(el.bounds.x + el.bounds.width / 2);
-            const y = Math.round(el.bounds.y + el.bounds.height / 2);
-            msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
+          const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
 
-            const domBefore = JSON.stringify(activeGraph.elements);
+          if (isDesktopMode) {
+            if (el && el.bounds) {
+              const x = Math.round(el.bounds.x + el.bounds.width / 2);
+              const y = Math.round(el.bounds.y + el.bounds.height / 2);
+              msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
-            if (action === 'type') {
-              await window.electronAPI.osAction({ action: 'type', x, y, text: args.text || '' });
-            } else {
-              await window.electronAPI.osAction({ action: 'click', x, y });
+              const domBefore = JSON.stringify(activeGraph.elements);
+
+              if (action === 'type') {
+                await window.electronAPI.osAction({ action: 'type', x, y, text: args.text || '' });
+              } else {
+                await window.electronAPI.osAction({ action: 'click', x, y });
+              }
+
+              if (action === 'click') await delay(2000);
+              else await delay(1200);
+              await refreshActiveGraph(wv);
             }
+          } else {
+            if (el && el.position) {
+              const x = Math.round(el.position.x + el.position.width / 2);
+              const y = Math.round(el.position.y + el.position.height / 2);
+              msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
-            if (action === 'click') await delay(2000); // Wait for app to respond
-            else await delay(1200);
-            await refreshActiveGraph();
+              const domBefore = JSON.stringify(activeGraph.elements);
+
+              if (action === 'type') {
+                // Step 1: Click the element to focus it
+                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
+                await delay(200);
+                // Step 2: Reliably clear the input field via JS before typing
+                await window.electronAPI.executeAction({
+                  webContentsId: wv.getWebContentsId(),
+                  action: 'execute_js',
+                  payload: { code: `(() => { const el = document.querySelector('[data-op-id="${targetId}"]'); if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } })();` }
+                });
+                await delay(100);
+                // Step 3: Type the new text
+                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'type', payload: { x, y, text: args.text || '' } });
+              } else {
+                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x, y } });
+              }
+
+              if (action === 'click') await waitForPageLoad(wv, 4000);
+              else await delay(1200);
+              await refreshActiveGraph(wv);
+            }
+          }
 
             const urlNow = wv.src || '';
             const domAfter = JSON.stringify(activeGraph.elements);
@@ -1184,13 +1274,25 @@ Return ONLY a JSON array of question strings, nothing else.`;
               appendAiMessage(`🔧 Recovery found alternative: <code>${recovery.target_id}</code> ("${recovery.target_text}") — ${recovery.reasoning}`);
               // Re-run the action on the recovered element
               const recEl = activeGraph.elements.find(e => e.id === recovery.target_id);
-              if (recEl && recEl.bounds) {
-                const rx = Math.round(recEl.bounds.x + recEl.bounds.width / 2);
-                const ry = Math.round(recEl.bounds.y + recEl.bounds.height / 2);
-                await window.electronAPI.osAction({ action: 'click', x: rx, y: ry });
-                await delay(2000);
-                await refreshActiveGraph();
-                previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
+              const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
+              if (isDesktopMode) {
+                if (recEl && recEl.bounds) {
+                  const rx = Math.round(recEl.bounds.x + recEl.bounds.width / 2);
+                  const ry = Math.round(recEl.bounds.y + recEl.bounds.height / 2);
+                  await window.electronAPI.osAction({ action: 'click', x: rx, y: ry });
+                  await delay(2000);
+                  await refreshActiveGraph(wv);
+                  previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
+                }
+              } else {
+                if (recEl && recEl.position) {
+                  const rx = Math.round(recEl.position.x + recEl.position.width / 2);
+                  const ry = Math.round(recEl.position.y + recEl.position.height / 2);
+                  await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x: rx, y: ry } });
+                  await waitForPageLoad(wv, 4000);
+                  await refreshActiveGraph(wv);
+                  previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
+                }
               }
             } else {
               previousActions.push(`${targetId} not found, Recovery Agent found no substitute. Try a different approach or scroll to find it.`);
@@ -1200,9 +1302,20 @@ Return ONLY a JSON array of question strings, nothing else.`;
         } else if (action === 'press_enter') {
           // Submit forms, confirm searches, send messages
           msg += `<br>↩️ Pressing Enter`;
-          await window.electronAPI.osAction({ action: 'press_enter' });
-          await delay(3000);
-          await refreshActiveGraph();
+          const isDesktopMode = document.getElementById('btn-mode-desktop')?.classList.contains('active');
+          if (isDesktopMode) {
+            await window.electronAPI.osAction({ action: 'press_enter' });
+            await delay(3000);
+            await refreshActiveGraph(wv);
+          } else {
+            await window.electronAPI.executeAction({
+              webContentsId: wv.getWebContentsId(),
+              action: 'keyboard_shortcut',
+              payload: { modifiers: [], keyCode: 'Return' }
+            });
+            await waitForPageLoad(wv, 6000);
+            await refreshActiveGraph(wv);
+          }
           const urlAfterEnter = wv.src || '';
           previousActions.push(
             `Pressed Enter. Page is now: ${urlAfterEnter}. ` +
