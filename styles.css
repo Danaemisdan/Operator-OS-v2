@@ -49,12 +49,11 @@ button, input, textarea, .dock-item, .browser-tab, .nav-btn, .close-btn, #chat-i
   width: 350px;
   display: flex;
   flex-direction: column;
-  background-color: rgba(28, 28, 30, 0.85); /* Slightly transparent dark grey */
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
+  background-color: var(--panel-bg);
+  backdrop-filter: var(--glass-fx);
+  -webkit-backdrop-filter: var(--glass-fx);
   border-right: 1px solid var(--border-color);
-  box-shadow: 2px 0 10px rgba(0,0,0,0.2);
-  z-index: 10;
+  min-width: 250px;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 

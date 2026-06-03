@@ -375,6 +375,26 @@ btnNewTab.addEventListener('click', () => {
 const btnModeBrowser = document.getElementById('btn-mode-browser');
 const btnModeDesktop = document.getElementById('btn-mode-desktop');
 
+let isDesktopPolling = false;
+
+async function startDesktopPolling(wv) {
+  if (isDesktopPolling) return;
+  isDesktopPolling = true;
+  
+  // Show the fullscreen HUD
+  window.electronAPI.osAction({ action: 'show_hud' });
+  
+  while (isDesktopPolling && document.getElementById('btn-mode-desktop')?.classList.contains('active')) {
+    await refreshActiveGraph(wv);
+    // Real-time interval (1.5 seconds)
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  
+  isDesktopPolling = false;
+  // Hide HUD when exiting
+  window.electronAPI.osAction({ action: 'hide_hud' });
+}
+
 btnModeBrowser.addEventListener('click', () => {
   btnModeBrowser.classList.add('active');
   btnModeDesktop.classList.remove('active');
@@ -383,14 +403,14 @@ btnModeBrowser.addEventListener('click', () => {
   btnModeDesktop.style.background = 'transparent';
   btnModeDesktop.style.color = '#a1a1aa';
   
+  isDesktopPolling = false;
+  window.electronAPI.osAction({ action: 'hide_hud' });
+  
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'flex'; // show browser view
   
   const wvc = document.getElementById('webview-container');
   if (wvc) wvc.style.background = ''; // restore white background
-  
-  const osOverlay = document.getElementById('os-vision-overlay');
-  if (osOverlay) osOverlay.style.display = 'none'; // hide OS labels
 });
 
 btnModeDesktop.addEventListener('click', async () => {
@@ -407,11 +427,8 @@ btnModeDesktop.addEventListener('click', async () => {
   const wvc = document.getElementById('webview-container');
   if (wvc) wvc.style.background = 'transparent'; // make background transparent to see OS
   
-  const osOverlay = document.getElementById('os-vision-overlay');
-  if (osOverlay) osOverlay.style.display = 'block'; // show OS labels
-  
-  // Force a re-scan of the desktop immediately
-  await refreshActiveGraph(wv);
+  // Start real-time scanning
+  startDesktopPolling(wv);
 });
 
 // Chat Logic & Planner Agent Loop
@@ -510,13 +527,13 @@ async function refreshActiveGraph(wv) {
       
       activeGraph = parsed;
       
-      // Draw the labels on the transparent Electron window!
-      drawVisionOverlay(visionElements);
+      // Update the fullscreen HUD
+      window.electronAPI.osAction({ action: 'update_hud', elements: visionElements });
       
     } catch (e) {
       console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
       activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
-      drawVisionOverlay([]); // Clear boxes on error
+      window.electronAPI.osAction({ action: 'update_hud', elements: [] });
     }
   } else {
     // ── BROWSER MODE: DOM Indexer ──

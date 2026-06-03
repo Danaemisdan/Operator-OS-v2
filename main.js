@@ -23,17 +23,20 @@ const downloadDir = path.join(os.homedir(), 'Operator Downloads');
 if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
 
 let llmProcess = null;
+let mainWindow;
+let overlayWindow;
 
 function createWindow () {
   const isMac = process.platform === 'darwin';
   
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     transparent: true,
-    backgroundColor: '#00000000',
     frame: isMac, // False on Windows for borderless transparency
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    vibrancy: 'fullscreen-ui', // macOS native blur
+    backgroundMaterial: 'acrylic', // Windows 11 native blur (Mica/Acrylic)
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       webviewTag: true
@@ -41,6 +44,29 @@ function createWindow () {
   });
 
   mainWindow.loadFile('index.html');
+
+  // --- FULLSCREEN HUD OVERLAY FOR DESKTOP OS VISION ---
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  overlayWindow = new BrowserWindow({
+    x: primaryDisplay.bounds.x,
+    y: primaryDisplay.bounds.y,
+    width: primaryDisplay.bounds.width,
+    height: primaryDisplay.bounds.height,
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    show: false, // hidden until activated
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+  
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.loadFile('overlay.html');
 }
 
 // Prevent Chromium from throttling our background agent workers
@@ -134,13 +160,6 @@ ipcMain.handle('save-knowledge', (event, { domain, elements }) => {
   return true;
 });
 
-ipcMain.handle('set-vibrancy', (event, mode) => {
-  if (mainWindow) {
-    mainWindow.setVibrancy(mode ? 'fullscreen-ui' : null);
-  }
-  return true;
-});
-
 let visionWorker = null;
 async function getVisionWorker() {
   if (!visionWorker) {
@@ -227,8 +246,21 @@ ipcMain.handle('get-vision-tree', async () => {
   }
 });
 
-ipcMain.handle('os-action', async (event, { action, x, y, text }) => {
+ipcMain.handle('os-action', async (event, { action, x, y, text, elements }) => {
   try {
+    if (action === 'show_hud') {
+      if (overlayWindow) overlayWindow.showInactive();
+      return true;
+    }
+    if (action === 'hide_hud') {
+      if (overlayWindow) overlayWindow.hide();
+      return true;
+    }
+    if (action === 'update_hud') {
+      if (overlayWindow) overlayWindow.webContents.send('update-hud', elements || []);
+      return true;
+    }
+
     if (action === 'click') {
       await mouse.setPosition(new Point(x, y));
       await mouse.leftClick();

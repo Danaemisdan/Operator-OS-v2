@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeAction:  (p) => ipcRenderer.invoke('execute-action', p),
   extractText:    (p) => ipcRenderer.invoke('extract-text', p),
   analyzeUI:      (g) => ipcRenderer.invoke('analyze-ui-llm', g),
-  setVibrancy:    (mode) => ipcRenderer.invoke('set-vibrancy', mode),
 
   // Agent
   agentChat:      (prompt, graph, prev, memory, hist, scratchpad, memorypad, query) => ipcRenderer.invoke('agent-chat', { promptText: prompt, graph, previousActions: prev, memory, conversationHistory: hist, taskScratchpad: scratchpad, memorypad, graphQuery: query }),
@@ -15,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAgentStream:    (cb) => ipcRenderer.on('agent-stream-chunk',   (_, t) => cb(t)),
   onResearchStream: (cb) => ipcRenderer.on('research-stream-chunk', (_, t) => cb(t)),
   onSkillAskUser:   (cb) => ipcRenderer.on('skill-ask-user',        (_, d) => cb(d)),
+  onUpdateHUD:      (cb) => ipcRenderer.on('update-hud',            (_, d) => cb(d)),
 
   // Intent + Skills
   classifyIntent: (msg)                        => ipcRenderer.invoke('classify-intent', msg),
