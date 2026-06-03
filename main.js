@@ -151,21 +151,23 @@ ipcMain.handle('get-vision-tree', async () => {
     const { data: { words } } = await Tesseract.recognize(imageBuffer, 'eng');
     
     let elements = [];
-    words.forEach((w, i) => {
-      if (w.confidence > 60 && w.text.trim().length > 0) {
-        elements.push({
-          id: `VIS_TXT_${i}`,
-          text: w.text.trim(),
-          role: 'text',
-          bounds: {
-            x: w.bbox.x0,
-            y: w.bbox.y0,
-            width: w.bbox.x1 - w.bbox.x0,
-            height: w.bbox.y1 - w.bbox.y0
-          }
-        });
-      }
-    });
+    if (words && Array.isArray(words)) {
+      words.forEach((w, i) => {
+        if (w.confidence > 60 && w.text.trim().length > 0) {
+          elements.push({
+            id: `VIS_TXT_${i}`,
+            text: w.text.trim(),
+            role: 'text',
+            bounds: {
+              x: w.bbox.x0,
+              y: w.bbox.y0,
+              width: w.bbox.x1 - w.bbox.x0,
+              height: w.bbox.y1 - w.bbox.y0
+            }
+          });
+        }
+      });
+    }
     return elements;
   } catch (err) {
     console.error("Vision Error:", err);
