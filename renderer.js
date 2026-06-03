@@ -510,43 +510,33 @@ async function handleChatSubmit() {
     return;
   }
 
-  // ─── refreshActiveGraph: re-scan the real live DOM and update activeGraph ────
-  async function refreshActiveGraph(wv) {
+  // ─── refreshActiveGraph: uses Zero-Server Computer Vision to map the OS ────
+  async function refreshActiveGraph() {
     try {
-      if (!wv || wv.getWebContentsId == null) return;
-      const response = await fetch('indexer.js');
-      const scriptText = await response.text();
-      const resultJson = await wv.executeJavaScript(`
-        try { ${scriptText} } catch(e) { JSON.stringify({error: e.message}); }
-      `);
-      if (!resultJson) return;
-      const parsed = JSON.parse(resultJson);
-      if (parsed.error) return;
-      // Enrich with semantic analysis
-      const analysis = await window.electronAPI.analyzeUI(parsed);
-      parsed.semanticPattern = analysis.semanticPattern;
-      parsed.elements.forEach(el => {
-        if (analysis.predictions && analysis.predictions[el.id]) {
-          el.predictedEffect = analysis.predictions[el.id];
-        }
-      });
+      // Get bounding boxes of clickable text on screen using Tesseract.js via Main IPC
+      const visionElements = await window.electronAPI.getVisionTree();
+      
+      const parsed = {
+        url: 'OS Desktop',
+        title: 'Native Environment',
+        semanticPattern: 'Desktop UI',
+        elements: visionElements
+      };
+      
+      // Enrich with semantic analysis if needed
+      if (visionElements.length > 0) {
+        const analysis = await window.electronAPI.analyzeUI(parsed);
+        parsed.elements.forEach(el => {
+          if (analysis.predictions && analysis.predictions[el.id]) {
+            el.predictedEffect = analysis.predictions[el.id];
+          }
+        });
+      }
+      
       activeGraph = parsed;
-
-      // ── Exploration Agent: runs on every page load, zero LLM ──────────────
-      // Classifies all elements, detects flows, stores page knowledge in KG.
-      // Silent — no UI output. This builds the behavioral map over time.
-      try {
-        const domain = new URL(parsed.url.startsWith('http') ? parsed.url : 'https://' + parsed.url).hostname;
-        const exploration = await window.electronAPI.explorePage({ graph: parsed, domain });
-        if (exploration && exploration.enrichedElements) {
-          // Merge exploration purposes back into activeGraph elements
-          activeGraph.elements = exploration.enrichedElements;
-          activeGraph._exploration = exploration.pageKnowledge;
-        }
-      } catch (_) {}
-
     } catch (e) {
-      console.warn('[refreshActiveGraph] failed:', e.message);
+      console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
+      activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
     }
   }
 
@@ -1103,54 +1093,22 @@ Return ONLY a JSON array of question strings, nothing else.`;
           const targetId = (args.targetId || '').trim();
           const el = activeGraph.elements.find(e => e.id === targetId);
 
-          if (el && el.position) {
-            const x = Math.round(el.position.x + el.position.width / 2);
-            const y = Math.round(el.position.y + el.position.height / 2);
+          if (el && el.bounds) {
+            const x = Math.round(el.bounds.x + el.bounds.width / 2);
+            const y = Math.round(el.bounds.y + el.bounds.height / 2);
             msg += `<br>🖱️ **${action}** [${x},${y}] on <code>${targetId}</code> ("${(el.text || '').substring(0,30)}")` ;
 
             const domBefore = JSON.stringify(activeGraph.elements);
 
             if (action === 'type') {
-              // Step 1: Click the element to focus it
-              await window.electronAPI.executeAction({
-                webContentsId: wv.getWebContentsId(),
-                action: 'click',
-                payload: { x, y }
-              });
-              await delay(200);
-              // Step 2: Reliably clear the input field via JS before typing
-              await window.electronAPI.executeAction({
-                webContentsId: wv.getWebContentsId(),
-                action: 'execute_js',
-                payload: { code: `
-                  (() => {
-                    const el = document.querySelector('[data-op-id="${targetId}"]');
-                    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-                      el.value = '';
-                      el.dispatchEvent(new Event('input', { bubbles: true }));
-                      el.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                  })();
-                `}
-              });
-              await delay(100);
-              // Step 3: Type the new text
-              await window.electronAPI.executeAction({
-                webContentsId: wv.getWebContentsId(),
-                action: 'type',
-                payload: { x, y, text: args.text || '' }
-              });
+              await window.electronAPI.osAction({ action: 'type', x, y, text: args.text || '' });
             } else {
-              await window.electronAPI.executeAction({
-                webContentsId: wv.getWebContentsId(),
-                action: 'click',
-                payload: { x, y }
-              });
+              await window.electronAPI.osAction({ action: 'click', x, y });
             }
 
-            if (action === 'click') await waitForPageLoad(wv, 4000);
-            else await delay(1200); // Increased from 600 to 1200 to let DOM settle after type
-            await refreshActiveGraph(wv);
+            if (action === 'click') await delay(2000); // Wait for app to respond
+            else await delay(1200);
+            await refreshActiveGraph();
 
             const urlNow = wv.src || '';
             const domAfter = JSON.stringify(activeGraph.elements);
@@ -1226,12 +1184,12 @@ Return ONLY a JSON array of question strings, nothing else.`;
               appendAiMessage(`🔧 Recovery found alternative: <code>${recovery.target_id}</code> ("${recovery.target_text}") — ${recovery.reasoning}`);
               // Re-run the action on the recovered element
               const recEl = activeGraph.elements.find(e => e.id === recovery.target_id);
-              if (recEl && recEl.position) {
-                const rx = Math.round(recEl.position.x + recEl.position.width / 2);
-                const ry = Math.round(recEl.position.y + recEl.position.height / 2);
-                await window.electronAPI.executeAction({ webContentsId: wv.getWebContentsId(), action: 'click', payload: { x: rx, y: ry } });
-                await waitForPageLoad(wv, 4000);
-                await refreshActiveGraph(wv);
+              if (recEl && recEl.bounds) {
+                const rx = Math.round(recEl.bounds.x + recEl.bounds.width / 2);
+                const ry = Math.round(recEl.bounds.y + recEl.bounds.height / 2);
+                await window.electronAPI.osAction({ action: 'click', x: rx, y: ry });
+                await delay(2000);
+                await refreshActiveGraph();
                 previousActions.push(`Recovery: used "${recovery.target_text}" (${recovery.target_id}) as substitute for missing "${targetId}". Confidence: ${recovery.confidence}`);
               }
             } else {
@@ -1242,13 +1200,9 @@ Return ONLY a JSON array of question strings, nothing else.`;
         } else if (action === 'press_enter') {
           // Submit forms, confirm searches, send messages
           msg += `<br>↩️ Pressing Enter`;
-          await window.electronAPI.executeAction({
-            webContentsId: wv.getWebContentsId(),
-            action: 'keyboard_shortcut',
-            payload: { modifiers: [], keyCode: 'Return' }
-          });
-          await waitForPageLoad(wv, 6000);
-          await refreshActiveGraph(wv);
+          await window.electronAPI.osAction({ action: 'press_enter' });
+          await delay(3000);
+          await refreshActiveGraph();
           const urlAfterEnter = wv.src || '';
           previousActions.push(
             `Pressed Enter. Page is now: ${urlAfterEnter}. ` +

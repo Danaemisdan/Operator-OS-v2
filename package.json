@@ -45,7 +45,9 @@
       "target": [
         {
           "target": "dir",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -60,6 +62,8 @@
   "dependencies": {
     "@node-llama-cpp/win-x64": "^3.18.1",
     "@node-llama-cpp/win-x64-cuda": "^3.18.1",
-    "node-llama-cpp": "^3.18.1"
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "node-llama-cpp": "^3.18.1",
+    "tesseract.js": "^7.0.0"
   }
 }

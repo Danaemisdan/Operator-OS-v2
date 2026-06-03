@@ -1,10 +1,13 @@
-const { app, BrowserWindow, ipcMain, webContents, session } = require('electron');
+const { app, BrowserWindow, ipcMain, webContents, session, desktopCapturer } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const Tesseract = require('tesseract.js');
+const { mouse, keyboard, Key, Point } = require('@nut-tree-fork/nut-js');
+
 const { analyzeUIWithLLM, chatAgentWithLLM } = require('./llm-bridge.js');
 const { classifyIntent } = require('./intent-classifier.js');
 const { matchSkill, extractArgs, skills } = require('./skills/_registry.js');
@@ -130,6 +133,68 @@ ipcMain.handle('save-knowledge', (event, { domain, elements }) => {
   for (const id in elements) db[domain].elements[id] = { ...db[domain].elements[id], ...elements[id] };
   fs.writeFileSync(legacyKnowledgePath, JSON.stringify(db, null, 2), 'utf8');
   return true;
+});
+
+// --- Phase 8: Pure Node.js Zero-Server OS Vision Pipeline ---
+ipcMain.handle('get-vision-tree', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({ 
+      types: ['screen'], 
+      thumbnailSize: { width: 1920, height: 1080 } 
+    });
+    if (sources.length === 0) return [];
+
+    const primaryScreen = sources[0];
+    const imageBuffer = primaryScreen.thumbnail.toPNG();
+
+    // Run Tesseract OCR in-memory on the screenshot
+    const { data: { words } } = await Tesseract.recognize(imageBuffer, 'eng');
+    
+    let elements = [];
+    words.forEach((w, i) => {
+      if (w.confidence > 60 && w.text.trim().length > 0) {
+        elements.push({
+          id: `VIS_TXT_${i}`,
+          text: w.text.trim(),
+          role: 'text',
+          bounds: {
+            x: w.bbox.x0,
+            y: w.bbox.y0,
+            width: w.bbox.x1 - w.bbox.x0,
+            height: w.bbox.y1 - w.bbox.y0
+          }
+        });
+      }
+    });
+    return elements;
+  } catch (err) {
+    console.error("Vision Error:", err);
+    return [];
+  }
+});
+
+ipcMain.handle('os-action', async (event, { action, x, y, text }) => {
+  try {
+    if (action === 'click') {
+      await mouse.setPosition(new Point(x, y));
+      await mouse.leftClick();
+      return true;
+    } else if (action === 'type') {
+      if (x !== undefined && y !== undefined) {
+        await mouse.setPosition(new Point(x, y));
+        await mouse.leftClick();
+      }
+      await keyboard.type(text);
+      return true;
+    } else if (action === 'press_enter') {
+      await keyboard.pressKey(Key.Return);
+      await keyboard.releaseKey(Key.Return);
+      return true;
+    }
+  } catch (err) {
+    console.error("OS Action Error:", err);
+  }
+  return false;
 });
 
 // --- Phase 7: Local LLM Integration Bridge ---

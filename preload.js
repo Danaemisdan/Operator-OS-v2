@@ -62,4 +62,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Exploration Agent + Behavioral Learning ──────────────────────────────
   explorePage:     (p) => ipcRenderer.invoke('explore-page', p),
   recordBehavior:  (p) => ipcRenderer.invoke('record-behavior', p),
+
+  // ── Pure Node Computer Vision & OS Control ─────────────────────────────
+  getVisionTree:   ()  => ipcRenderer.invoke('get-vision-tree'),
+  osAction:        (p) => ipcRenderer.invoke('os-action', p),
 });
