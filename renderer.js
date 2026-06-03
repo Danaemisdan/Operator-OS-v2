@@ -385,6 +385,9 @@ btnModeBrowser.addEventListener('click', () => {
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'flex'; // show browser view
   
+  const wvc = document.getElementById('webview-container');
+  if (wvc) wvc.style.background = ''; // restore white background
+  
   const osOverlay = document.getElementById('os-vision-overlay');
   if (osOverlay) osOverlay.style.display = 'none'; // hide OS labels
 });
@@ -398,6 +401,9 @@ btnModeDesktop.addEventListener('click', async () => {
   btnModeBrowser.style.color = '#a1a1aa';
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'none'; // hide browser view
+  
+  const wvc = document.getElementById('webview-container');
+  if (wvc) wvc.style.background = 'transparent'; // make background transparent to see OS
   
   const osOverlay = document.getElementById('os-vision-overlay');
   if (osOverlay) osOverlay.style.display = 'block'; // show OS labels
