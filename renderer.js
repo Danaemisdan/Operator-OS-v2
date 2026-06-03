@@ -384,6 +384,9 @@ btnModeBrowser.addEventListener('click', () => {
   btnModeDesktop.style.color = '#a1a1aa';
   const wv = getActiveWebview();
   if (wv) wv.style.display = 'flex'; // show browser view
+  
+  const osOverlay = document.getElementById('os-vision-overlay');
+  if (osOverlay) osOverlay.style.display = 'none'; // hide OS labels
 });
 
 btnModeDesktop.addEventListener('click', () => {
@@ -394,7 +397,10 @@ btnModeDesktop.addEventListener('click', () => {
   btnModeBrowser.style.background = 'transparent';
   btnModeBrowser.style.color = '#a1a1aa';
   const wv = getActiveWebview();
-  if (wv) wv.style.display = 'none'; // hide browser view, reveal desktop behind the transparent window
+  if (wv) wv.style.display = 'none'; // hide browser view
+  
+  const osOverlay = document.getElementById('os-vision-overlay');
+  if (osOverlay) osOverlay.style.display = 'block'; // show OS labels
 });
 
 // Chat Logic & Planner Agent Loop
@@ -534,6 +540,51 @@ async function handleChatSubmit() {
     lucide.createIcons();
     await window.electronAPI.startResearch(goalText);
     return;
+  // ─── OS Vision Overlay Drawer ────
+  function drawVisionOverlay(elements) {
+    const overlayContainer = document.getElementById('os-vision-overlay');
+    if (!overlayContainer) return;
+    
+    overlayContainer.replaceChildren(); // clear old boxes
+    
+    // Create a shadow root or fragment to append elements efficiently
+    const fragment = document.createDocumentFragment();
+    
+    elements.forEach(el => {
+      if (!el.bounds) return;
+      
+      const box = document.createElement('div');
+      box.style.position = 'absolute';
+      box.style.left = el.bounds.x + 'px';
+      box.style.top = el.bounds.y + 'px';
+      box.style.width = el.bounds.width + 'px';
+      box.style.height = el.bounds.height + 'px';
+      box.style.border = '2px solid rgba(16, 185, 129, 0.7)'; // Tailwind emerald-500
+      box.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+      box.style.boxSizing = 'border-box';
+      box.style.pointerEvents = 'none';
+      box.style.zIndex = '999999';
+      box.style.borderRadius = '3px';
+      
+      const label = document.createElement('div');
+      label.textContent = el.id;
+      label.style.position = 'absolute';
+      label.style.top = '-18px';
+      label.style.left = '-2px';
+      label.style.backgroundColor = 'rgba(16, 185, 129, 0.9)';
+      label.style.color = '#fff';
+      label.style.fontSize = '10px';
+      label.style.fontWeight = 'bold';
+      label.style.padding = '2px 4px';
+      label.style.borderRadius = '3px';
+      label.style.whiteSpace = 'nowrap';
+      label.style.fontFamily = 'monospace';
+      
+      box.appendChild(label);
+      fragment.appendChild(box);
+    });
+    
+    overlayContainer.appendChild(fragment);
   }
 
   // ─── refreshActiveGraph: Dual Mode (Browser or OS Desktop) ────
@@ -563,9 +614,14 @@ async function handleChatSubmit() {
         }
         
         activeGraph = parsed;
+        
+        // Draw the labels on the transparent Electron window!
+        drawVisionOverlay(visionElements);
+        
       } catch (e) {
         console.warn('[refreshActiveGraph] Vision mapping failed:', e.message);
         activeGraph = { url: 'OS Desktop', title: 'Error', elements: [] };
+        drawVisionOverlay([]); // Clear boxes on error
       }
     } else {
       // ── BROWSER MODE: DOM Indexer ──
