@@ -54,6 +54,7 @@ function createWindow () {
     width: primaryDisplay.bounds.width,
     height: primaryDisplay.bounds.height,
     transparent: true,
+    backgroundColor: '#00000000',
     frame: false,
     hasShadow: false,
     alwaysOnTop: true,

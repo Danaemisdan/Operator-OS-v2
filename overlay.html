@@ -50,9 +50,11 @@
   <div id="hud-container"></div>
   <script>
     // Listen for elements from main process
-    window.electronAPI.onUpdateHUD((event, elements) => {
+    window.electronAPI.onUpdateHUD((elements) => {
       const container = document.getElementById('hud-container');
       container.replaceChildren();
+      
+      if (!elements || !elements.forEach) return;
       
       const fragment = document.createDocumentFragment();
       elements.forEach(el => {
