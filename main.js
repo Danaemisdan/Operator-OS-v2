@@ -66,6 +66,8 @@ function createWindow () {
     }
   });
   
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   overlayWindow.loadFile('overlay.html');
 }
@@ -250,7 +252,7 @@ ipcMain.handle('get-vision-tree', async () => {
 ipcMain.handle('os-action', async (event, { action, x, y, text, elements }) => {
   try {
     if (action === 'show_hud') {
-      if (overlayWindow) overlayWindow.showInactive();
+      if (overlayWindow) overlayWindow.show();
       return true;
     }
     if (action === 'hide_hud') {
