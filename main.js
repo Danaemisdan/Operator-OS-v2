@@ -33,6 +33,7 @@ function createWindow () {
     width: 1400,
     height: 900,
     transparent: true,
+    backgroundColor: '#00000000',
     frame: isMac, // False on Windows for borderless transparency
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     vibrancy: 'fullscreen-ui', // macOS native blur
